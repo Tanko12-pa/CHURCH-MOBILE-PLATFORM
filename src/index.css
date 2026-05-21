@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Sophisticated Typography Classes */
+.font-decorative {
+  font-family: 'Cinzel Decorative', Georgia, serif;
+}
+
+.font-serif-cinzel {
+  font-family: 'Cinzel', Georgia, serif;
+}
+
+.font-sans-raleway {
+  font-family: 'Raleway', system-ui, sans-serif;
+}
+
+.font-memo {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom CSS Scrollbar Styling for a premium unified experience */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0A0F1E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.4);
+}
+
+/* Elegant gold aura & shadows */
+.gold-glow {
+  box-shadow: 0 4px 24px rgba(212, 175, 55, 0.08);
+}
+
+.gold-glow-hover:hover {
+  box-shadow: 0 4px 24px rgba(212, 175, 55, 0.15);
+  border-color: rgba(212, 175, 55, 0.5) !important;
+}
+
+/* Subtle visual gold line under headings */
+.gold-divider {
+  position: relative;
+}
+.gold-divider::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 40px;
+  height: 1px;
+  background: #D4AF37;
+}
+
+/* Smooth custom transitions */
+.transition-luxury {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "FaithFlow Ministry Platform",
+  "description": "An elite AI-powered ministry platform featuring Bible tools, church management modules, media generators, study outlines, and sermon preparation assistance.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

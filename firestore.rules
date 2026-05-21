@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. GLOBAL SAFETY NET: Default catch-all denies everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 3. PRIMITIVE DEFINITIONS & IDENTITIES
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      // Allow if verified, or fallback to default authenticated status if user email is active
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.email == "akindewum@gmail.com");
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == "akindewum@gmail.com";
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. VALIDATION BLUEPRINTS
+    
+    // Member validation
+    function isValidMember(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'email', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 128
+        && data.role is string && data.role.size() <= 64
+        && data.email is string && data.email.size() <= 128
+        && data.status is string && (data.status == 'Active' || data.status == 'Inactive')
+        && (!data.keys().contains('phone') || (data.phone is string && data.phone.size() <= 32))
+        && (!data.keys().contains('demographic') || (data.demographic is string && (data.demographic == 'Children' || data.demographic == 'Youth' || data.demographic == 'Adult' || data.demographic == 'Men' || data.demographic == 'Women')))
+        && (!data.keys().contains('joinedAt') || data.joinedAt is string)
+        && (!data.keys().contains('notes') || (data.notes is string && data.notes.size() <= 2048));
+    }
+
+    // Newcomer validation
+    function isValidNewComer(data) {
+      return data.keys().hasAll(['id', 'name', 'status'])
+        && data.id is string
+        && data.name is string && data.name.size() <= 128
+        && data.status is string && (data.status == 'New' || data.status == 'Contacted' || data.status == 'Attending' || data.status == 'Converted' || data.status == 'Member')
+        && (!data.keys().contains('email') || data.email is string)
+        && (!data.keys().contains('phone') || data.phone is string)
+        && (!data.keys().contains('assignedTo') || data.assignedTo is string)
+        && (!data.keys().contains('firstVisit') || data.firstVisit is string)
+        && (!data.keys().contains('followUpNotes') || data.followUpNotes is string);
+    }
+
+    // Attendance Record validation
+    function isValidAttendanceRecord(data) {
+      return data.keys().hasAll(['id', 'date', 'serviceType', 'attendanceCount'])
+        && data.id is string
+        && data.date is string
+        && data.serviceType is string
+        && data.attendanceCount is int && data.attendanceCount >= 0
+        && (!data.keys().contains('newVisitors') || (data.newVisitors is int && data.newVisitors >= 0));
+    }
+
+    // Special Event validation
+    function isValidSpecialEvent(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'date'])
+        && data.id is string
+        && data.name is string && data.name.size() <= 256
+        && data.type is string && (data.type == 'Crusade' || data.type == 'Retreat' || data.type == 'Conference' || data.type == 'Seminar' || data.type == 'Concert')
+        && data.date is string
+        && (!data.keys().contains('venue') || data.venue is string)
+        && (!data.keys().contains('budget') || data.budget is int)
+        && (!data.keys().contains('expectedAttendance') || data.expectedAttendance is int)
+        && (!data.keys().contains('notes') || data.notes is string)
+        && (!data.keys().contains('salvations') || data.salvations is int);
+    }
+
+    // Video Link validation
+    function isValidVideoLink(data) {
+      return data.keys().hasAll(['id', 'title', 'url', 'category'])
+        && data.id is string
+        && data.title is string && data.title.size() <= 256
+        && data.url is string && data.url.size() <= 512
+        && data.category is string && (data.category == 'Sermon' || data.category == 'Worship' || data.category == 'Outreach' || data.category == 'Seminar')
+        && (!data.keys().contains('uploadedAt') || data.uploadedAt is string);
+    }
+
+    // Sent Email validation
+    function isValidSentEmail(data) {
+      return data.keys().hasAll(['id', 'to', 'subject', 'body', 'sentAt', 'status'])
+        && data.id is string
+        && data.to is string
+        && data.subject is string && data.subject.size() <= 256
+        && data.body is string && data.body.size() <= 65536
+        && data.sentAt is string
+        && data.status is string && (data.status == 'Sent' || data.status == 'Scheduled' || data.status == 'Draft');
+    }
+
+
+    // 4. COLLECTION ROUTING & HARDENING
+
+    // Members collection
+    match /members/{memberId} {
+      allow get: if isEmailVerified();
+      allow list: if isEmailVerified();
+      allow create: if isEmailVerified() && isValidId(memberId) && isValidMember(incoming());
+      allow update: if isEmailVerified() && isValidId(memberId) && isValidMember(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(memberId);
+    }
+
+    // Newcomers collection
+    match /newcomers/{newcomerId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(newcomerId) && isValidNewComer(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(newcomerId);
+    }
+
+    // Attendance collection
+    match /attendance/{logId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(logId) && isValidAttendanceRecord(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(logId);
+    }
+
+    // Special Events collection
+    match /events/{eventId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(eventId) && isValidSpecialEvent(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(eventId);
+    }
+
+    // Video Links collection
+    match /videos/{videoId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(videoId) && isValidVideoLink(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(videoId);
+    }
+
+    // Sent Emails collection
+    match /emails/{emailId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(emailId) && isValidSentEmail(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(emailId);
+    }
+  }
+}

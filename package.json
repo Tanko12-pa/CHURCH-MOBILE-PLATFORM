@@ -1,0 +1,37 @@
+{
+  "name": "faithflow-ministry-platform",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "d3": "latest",
+    "express": "^4.19.2",
+    "firebase": "^12.13.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "latest",
+    "@types/d3": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "^4.3.1",
+    "esbuild": "^0.21.1",
+    "postcss": "^8.4.38",
+    "tailwindcss": "latest",
+    "tsx": "^4.22.3",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}
