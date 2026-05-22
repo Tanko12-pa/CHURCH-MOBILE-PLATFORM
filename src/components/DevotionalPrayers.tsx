@@ -76,7 +76,9 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
   const [dailyGoals, setDailyGoals] = useState({
     bibleReading: false,
     meditationTime: false,
+    journaling: false,
   });
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("faithflow_daily_spiritual_goals");
@@ -617,12 +619,14 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
     return `${String(mins).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
   };
 
-  const handleToggleGoal = (key: "bibleReading" | "meditationTime") => {
+  const handleToggleGoal = (key: "bibleReading" | "meditationTime" | "journaling") => {
     setDailyGoals(prev => {
       const next = { ...prev, [key]: !prev[key] };
       localStorage.setItem("faithflow_daily_spiritual_goals", JSON.stringify(next));
       if (next[key]) {
-        const label = key === "bibleReading" ? "Bible Reading" : "Meditation Time";
+        let label = "Journaling";
+        if (key === "bibleReading") label = "Bible Reading";
+        else if (key === "meditationTime") label = "Meditation Time";
         triggerToast("🌟", `Daily '${label}' goal completed! Keep growing in grace.`);
       }
       return next;
@@ -1247,14 +1251,51 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
 
                 {/* Daily Goals Tracker card */}
                 <div className="bg-[#050D1E]/95 border border-[#D4AF37]/25 p-5 rounded-2xl space-y-4 shadow-lg">
-                  <div className="border-b border-slate-800 pb-2">
-                    <h3 className="text-sm font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                      <FlameKindling className="w-4 h-4 text-[#D4AF37]" /> Daily Spiritual Goals
-                    </h3>
-                    <p className="text-[10px] text-slate-400">Track your daily devotion standards for spiritual growth.</p>
+                  <div className="border-b border-slate-800 pb-2 flex justify-between items-center">
+                    <div>
+                      <h3 className="text-sm font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                        <FlameKindling className="w-4 h-4 text-[#D4AF37]" /> Daily Spiritual Goals
+                      </h3>
+                      <p className="text-[10px] text-slate-400">Track your daily devotion standards for spiritual growth.</p>
+                    </div>
+                    <button
+                      onClick={() => setShowResetConfirm(true)}
+                      className="text-[10px] text-slate-400 hover:text-rose-400 font-bold uppercase tracking-wider transition duration-150 border border-slate-800/80 hover:border-rose-500/20 px-2 py-1 rounded cursor-pointer"
+                      title="Reset all goals progress"
+                    >
+                      Reset
+                    </button>
                   </div>
+
+                  {/* Confirmation Reset Overlay inside Tracker card */}
+                  {showResetConfirm && (
+                    <div className="bg-rose-950/30 border border-rose-500/30 p-3 rounded-xl space-y-2 animate-fade-in text-xs text-rose-200">
+                      <p className="font-semibold text-center leading-relaxed text-[11px]">Are you sure you want to reset your daily spiritual goals? This action cannot be undone.</p>
+                      <div className="flex gap-2 justify-center">
+                        <button
+                          onClick={() => {
+                            const cleared = { bibleReading: false, meditationTime: false, journaling: false };
+                            setDailyGoals(cleared);
+                            localStorage.setItem("faithflow_daily_spiritual_goals", JSON.stringify(cleared));
+                            setShowResetConfirm(false);
+                            triggerToast("🔄", "Spiritual goals progress has been reset safely.");
+                          }}
+                          className="bg-rose-700 hover:bg-rose-800 text-white font-extrabold text-[10px] uppercase py-1 px-3 rounded transition cursor-pointer"
+                        >
+                          Yes, Reset
+                        </button>
+                        <button
+                          onClick={() => setShowResetConfirm(false)}
+                          className="bg-slate-850 hover:bg-slate-800 text-slate-300 font-extrabold text-[10px] uppercase py-1 px-3 rounded transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="space-y-2.5">
+                    {/* Goal 1: Bible Reading */}
                     <button
                       onClick={() => handleToggleGoal("bibleReading")}
                       className={`w-full text-left p-2.5 rounded-xl border text-xs transition duration-150 flex items-center gap-3 cursor-pointer ${
@@ -1276,6 +1317,7 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
                       </div>
                     </button>
 
+                    {/* Goal 2: Meditation */}
                     <button
                       onClick={() => handleToggleGoal("meditationTime")}
                       className={`w-full text-left p-2.5 rounded-xl border text-xs transition duration-150 flex items-center gap-3 cursor-pointer ${
@@ -1296,24 +1338,46 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
                         <span className="text-[10px] text-slate-400 block font-normal">Spend quiet time in deep study contemplation</span>
                       </div>
                     </button>
+
+                    {/* Goal 3: Journaling */}
+                    <button
+                      onClick={() => handleToggleGoal("journaling")}
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs transition duration-150 flex items-center gap-3 cursor-pointer ${
+                        dailyGoals.journaling 
+                          ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" 
+                          : "bg-[#030611] border-slate-800 hover:border-slate-700 text-slate-300"
+                      }`}
+                    >
+                      <div className="shrink-0 select-none">
+                        {dailyGoals.journaling ? (
+                          <CheckCircle className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <span className="w-4 h-4 rounded border border-slate-700 block transition hover:border-[#D4AF37]" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <span className="font-bold text-[11.5px] block">Journaling Goal</span>
+                        <span className="text-[10px] text-slate-400 block font-normal">Scribe daily observations and answers to prayers</span>
+                      </div>
+                    </button>
                   </div>
 
                   <div className="space-y-1.5 pt-1">
-                    <div className="flex justify-between text-[11px] font-mono text-slate-400 font-bold">
+                    <div className="flex justify-between text-[11px] font-mono text-slate-400 font-bold animate-fade-in">
                       <span>Daily Goals Progress</span>
-                      <span className={((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)) === 100 ? "text-emerald-400 font-extrabold" : "text-[#D4AF37]"}>
-                        {((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0))}% Done
+                      <span className={Math.round(((dailyGoals.bibleReading ? 1 : 0) + (dailyGoals.meditationTime ? 1 : 0) + (dailyGoals.journaling ? 1 : 0)) * 100 / 3) === 100 ? "text-emerald-400 font-extrabold animate-pulse" : "text-[#D4AF37]"}>
+                        {Math.round(((dailyGoals.bibleReading ? 1 : 0) + (dailyGoals.meditationTime ? 1 : 0) + (dailyGoals.journaling ? 1 : 0)) * 100 / 3)}% Done
                       </span>
                     </div>
                     <div className="w-full h-2 rounded bg-slate-900 overflow-hidden border border-slate-800">
                       <div 
-                        className="h-full bg-gradient-to-r from-[#D4AF37] to-emerald-400 transition-all duration-500"
-                        style={{ width: `${(dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)}%` }}
+                        className="h-full bg-gradient-to-r from-[#D4AF37] to-emerald-400 transition-all duration-[650ms] ease-out shadow-[0_0_12px_rgba(212,175,55,0.2)]"
+                        style={{ width: `${Math.round(((dailyGoals.bibleReading ? 1 : 0) + (dailyGoals.meditationTime ? 1 : 0) + (dailyGoals.journaling ? 1 : 0)) * 100 / 3)}%` }}
                       />
                     </div>
-                    {((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)) === 100 && (
-                      <span className="text-[9px] text-emerald-400 font-bold block animate-pulse text-center">
-                        🎉 Sovereign spiritual targets met for today!
+                    {Math.round(((dailyGoals.bibleReading ? 1 : 0) + (dailyGoals.meditationTime ? 1 : 0) + (dailyGoals.journaling ? 1 : 0)) * 100 / 3) === 100 && (
+                      <span className="text-[9.5px] text-emerald-400 font-extrabold block animate-pulse text-center pt-0.5">
+                        🎉 Hallelujah! All spiritual targets for today are met perfectly!
                       </span>
                     )}
                   </div>
