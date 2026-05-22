@@ -754,6 +754,103 @@ Return structure MUST fit this schema:
   }
 });
 
+// 8.5. BIBLE STUDY SUITE - SUGGEST 3 RELEVANT CROSS-REFERENCE SCRIPTURES USING GEMINI API
+app.post("/api/gemini/cross-references", async (req, res) => {
+  const { topic } = req.body;
+  if (!topic) {
+    return res.status(400).json({ error: "Missing study topic for producing cross-references." });
+  }
+
+  try {
+    const ai = getGenAI();
+    const prompt = `Identify and suggest exactly three highly relevant and biblically sound cross-reference scriptures that directly support or elaborate on the study topic "${topic}".
+For each suggestion, provide:
+1. "ref": The direct scriptural passage reference (e.g. "James 1:22" or "Galatians 5:22-23")
+2. "text": The actual scriptural verse text (usually in a standard majestic translation style like KJV/NKJV or clear ESV)
+3. "context": A concise, executive sentence explaining why the scripture links perfectly with the topic.
+
+Return structure must fit this schema:
+{
+  "suggestions": [
+    {
+      "ref": "string",
+      "text": "string",
+      "context": "string"
+    }
+  ]
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            suggestions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  ref: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                  context: { type: Type.STRING }
+                },
+                required: ["ref", "text", "context"]
+              }
+            }
+          },
+          required: ["suggestions"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    res.json(parsed);
+  } catch (err: any) {
+    console.error("Cross-references generation failure:", err);
+    // Offline/Fallback simulation mode covering basic theological constructs
+    const defaultSuggestions = [
+      {
+        ref: "Galatians 2:20",
+        text: "I am crucified with Christ: nevertheless I live; yet not I, but Christ liveth in me...",
+        context: "Depicts the total surrender and Union with Christ that underpins any true spiritual life."
+      },
+      {
+        ref: "Romans 12:2",
+        text: "And be not conformed to this world: but be ye transformed by the renewing of your mind...",
+        context: "Outlines the continuous mental and moral alignment needed to separate from worldliness."
+      },
+      {
+        ref: "Colossians 3:1-2",
+        text: "If ye then be risen with Christ, seek those things which are above, where Christ sitteth on the right hand of God.",
+        context: "Instructs believers to elevate their focus to eternal, celestial realities rather than Earthly things."
+      }
+    ];
+
+    // Customize based on keywords in topic
+    const topicLower = topic.toLowerCase();
+    if (topicLower.includes("sanctification") || topicLower.includes("holiness")) {
+      // kept default
+    } else if (topicLower.includes("faith") || topicLower.includes("grace")) {
+      defaultSuggestions[0] = {
+        ref: "Ephesians 2:8-9",
+        text: "For by grace are ye saved through faith; and that not of yourselves: it is the gift of God: Not of works, lest any man should boast.",
+        context: "Establishes the absolute baseline that salvific grace precedes all righteous works."
+      };
+    } else if (topicLower.includes("pray") || topicLower.includes("worship") || topicLower.includes("communion")) {
+      defaultSuggestions[0] = {
+        ref: "1 Thessalonians 5:17",
+        text: "Pray without ceasing.",
+        context: "Urges constant consciousness and active communion with the Father."
+      };
+    }
+
+    res.json({ suggestions: defaultSuggestions, isOffline: true });
+  }
+});
+
 // 9. DOCTRINAL AUDIT REFINEMENT ENGINE (AI THEOLOGY & APOLOGETICS EDITOR)
 app.post("/api/gemini/refine-doctrine", async (req, res) => {
   const { claim, section, currentValue, instruction } = req.body;

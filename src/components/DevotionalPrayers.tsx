@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { 
   Sparkles, Play, Pause, Square, Copy, Check, Flame, MessageSquare, BookOpen, Star, HelpCircle, 
   Heart, CheckSquare, RotateCw, ExternalLink, Bell, Volume2, VolumeX, SkipForward, SkipBack, 
-  Calendar, Trash2, Clock, Music, Plus, History, ChevronRight, CheckCircle, FlameKindling
+  Calendar, Trash2, Clock, Music, Plus, History, ChevronRight, CheckCircle, FlameKindling,
+  Search, Download
 } from "lucide-react";
 import { 
   collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs 
@@ -71,6 +72,22 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
   const [newJournalTitle, setNewJournalTitle] = useState("");
   const [newJournalRequest, setNewJournalRequest] = useState("");
   const [journalFilter, setJournalFilter] = useState<"All" | "Active" | "Answered">("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dailyGoals, setDailyGoals] = useState({
+    bibleReading: false,
+    meditationTime: false,
+  });
+
+  useEffect(() => {
+    const stored = localStorage.getItem("faithflow_daily_spiritual_goals");
+    if (stored) {
+      try {
+        setDailyGoals(JSON.parse(stored));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
 
   // Saved Devotions History states
   const [savedDevotions, setSavedDevotions] = useState<DevotionalSession[]>([]);
@@ -600,10 +617,51 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
     return `${String(mins).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
   };
 
+  const handleToggleGoal = (key: "bibleReading" | "meditationTime") => {
+    setDailyGoals(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem("faithflow_daily_spiritual_goals", JSON.stringify(next));
+      if (next[key]) {
+        const label = key === "bibleReading" ? "Bible Reading" : "Meditation Time";
+        triggerToast("🌟", `Daily '${label}' goal completed! Keep growing in grace.`);
+      }
+      return next;
+    });
+  };
+
+  const handleExportCSV = () => {
+    if (journalEntries.length === 0) {
+      triggerToast("⚠️", "There are no journal entries to export!");
+      return;
+    }
+    const headers = ["ID", "Title", "Petition / Request", "Status", "Created At", "Answered At"];
+    const rows = journalEntries.map(e => [
+      e.id,
+      `"${e.title.replace(/"/g, '""')}"`,
+      `"${e.request.replace(/"/g, '""')}"`,
+      e.status,
+      e.createdAt,
+      e.answeredAt || ""
+    ]);
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `FaithFlow_Prayer_Journal_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    triggerToast("📥", "Exported all prayer journal entries to CSV successfully!");
+  };
+
   // Filtered journal entries
   const filteredJournal = journalEntries.filter(e => {
-    if (journalFilter === "All") return true;
-    return e.status === journalFilter;
+    const matchesStatus = journalFilter === "All" || e.status === journalFilter;
+    const matchesSearch = 
+      e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.request.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesStatus && matchesSearch;
   });
 
   return (
@@ -1143,47 +1201,123 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
           <div className="col-span-1 lg:col-span-12 space-y-6 animate-fade-in text-white">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
               
-              {/* Journal Record Entry Form */}
-              <div className="col-span-1 md:col-span-4 bg-[#050D1E]/95 border border-slate-800 p-5 rounded-2xl space-y-4">
-                <div className="border-b border-slate-800 pb-2">
-                  <h3 className="text-sm font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
-                    <Plus className="w-4 h-4 text-[#D4AF37]" /> Log a Prayer Petition
-                  </h3>
-                  <p className="text-[10px] text-slate-400">Record your cries, petitions, and intercessory burdens to track God's faithfulness.</p>
+              {/* Journal Record Entry Form & Daily Goals Tracker */}
+              <div className="col-span-1 md:col-span-4 space-y-4">
+                <div className="bg-[#050D1E]/95 border border-slate-800 p-5 rounded-2xl space-y-4 shadow-lg">
+                  <div className="border-b border-slate-800 pb-2">
+                    <h3 className="text-sm font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
+                      <Plus className="w-4 h-4 text-[#D4AF37]" /> Log a Prayer Petition
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Record your cries, petitions, and intercessory burdens to track God's faithfulness.</p>
+                  </div>
+
+                  <form onSubmit={handleCreateJournal} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-300 block">Burden Subject / Title</label>
+                      <input 
+                        type="text"
+                        required
+                        value={newJournalTitle}
+                        onChange={e => setNewJournalTitle(e.target.value)}
+                        placeholder="e.g., Mother's Heart Healing"
+                        className="w-full text-xs font-medium bg-[#030611] border border-slate-800 focus:border-[#D4AF37] rounded-lg p-3 outline-none text-white transition"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-300 block">Specific Petition / Details</label>
+                      <textarea 
+                        required
+                        rows={5}
+                        value={newJournalRequest}
+                        onChange={e => setNewJournalRequest(e.target.value)}
+                        placeholder="Excribe details of the petition, scriptural promises you are claiming, and target dates..."
+                        className="w-full text-xs font-medium bg-[#030611] border border-slate-800 focus:border-[#D4AF37] rounded-lg p-3 outline-none text-white transition resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full bg-[#D4AF37] hover:bg-[#E5BF48] text-black font-extrabold text-xs py-3 rounded-lg shadow-md cursor-pointer transition flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-black" /> Insert Journal Entry
+                    </button>
+                  </form>
                 </div>
 
-                <form onSubmit={handleCreateJournal} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-300 block">Burden Subject / Title</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newJournalTitle}
-                      onChange={e => setNewJournalTitle(e.target.value)}
-                      placeholder="e.g., Mother's Heart Healing"
-                      className="w-full text-xs font-medium bg-[#030611] border border-slate-800 focus:border-[#D4AF37] rounded-lg p-3 outline-none text-white transition"
-                    />
+                {/* Daily Goals Tracker card */}
+                <div className="bg-[#050D1E]/95 border border-[#D4AF37]/25 p-5 rounded-2xl space-y-4 shadow-lg">
+                  <div className="border-b border-slate-800 pb-2">
+                    <h3 className="text-sm font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                      <FlameKindling className="w-4 h-4 text-[#D4AF37]" /> Daily Spiritual Goals
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Track your daily devotion standards for spiritual growth.</p>
+                  </div>
+                  
+                  <div className="space-y-2.5">
+                    <button
+                      onClick={() => handleToggleGoal("bibleReading")}
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs transition duration-150 flex items-center gap-3 cursor-pointer ${
+                        dailyGoals.bibleReading 
+                          ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" 
+                          : "bg-[#030611] border-slate-800 hover:border-slate-700 text-slate-300"
+                      }`}
+                    >
+                      <div className="shrink-0 select-none">
+                        {dailyGoals.bibleReading ? (
+                          <CheckCircle className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <span className="w-4 h-4 rounded border border-slate-700 block transition hover:border-[#D4AF37]" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <span className="font-bold text-[11.5px] block">Bible Reading Goal</span>
+                        <span className="text-[10px] text-slate-400 block font-normal">Complete scriptural readings for today</span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => handleToggleGoal("meditationTime")}
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs transition duration-150 flex items-center gap-3 cursor-pointer ${
+                        dailyGoals.meditationTime 
+                          ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300" 
+                          : "bg-[#030611] border-slate-800 hover:border-slate-700 text-slate-300"
+                      }`}
+                    >
+                      <div className="shrink-0 select-none">
+                        {dailyGoals.meditationTime ? (
+                          <CheckCircle className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <span className="w-4 h-4 rounded border border-slate-700 block transition hover:border-[#D4AF37]" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <span className="font-bold text-[11.5px] block">Meditation Time Goal</span>
+                        <span className="text-[10px] text-slate-400 block font-normal">Spend quiet time in deep study contemplation</span>
+                      </div>
+                    </button>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-300 block">Specific Petition / Details</label>
-                    <textarea 
-                      required
-                      rows={5}
-                      value={newJournalRequest}
-                      onChange={e => setNewJournalRequest(e.target.value)}
-                      placeholder="Excribe details of the petition, scriptural promises you are claiming, and target dates..."
-                      className="w-full text-xs font-medium bg-[#030611] border border-slate-800 focus:border-[#D4AF37] rounded-lg p-3 outline-none text-white transition resize-none"
-                    />
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-[11px] font-mono text-slate-400 font-bold">
+                      <span>Daily Goals Progress</span>
+                      <span className={((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)) === 100 ? "text-emerald-400 font-extrabold" : "text-[#D4AF37]"}>
+                        {((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0))}% Done
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded bg-slate-900 overflow-hidden border border-slate-800">
+                      <div 
+                        className="h-full bg-gradient-to-r from-[#D4AF37] to-emerald-400 transition-all duration-500"
+                        style={{ width: `${(dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)}%` }}
+                      />
+                    </div>
+                    {((dailyGoals.bibleReading ? 50 : 0) + (dailyGoals.meditationTime ? 50 : 0)) === 100 && (
+                      <span className="text-[9px] text-emerald-400 font-bold block animate-pulse text-center">
+                        🎉 Sovereign spiritual targets met for today!
+                      </span>
+                    )}
                   </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-[#D4AF37] hover:bg-[#E5BF48] text-black font-extrabold text-xs py-3 rounded-lg shadow-md cursor-pointer transition flex items-center justify-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-black" /> Insert Journal Entry
-                  </button>
-                </form>
+                </div>
               </div>
 
               {/* Journal Board and Timelines */}
@@ -1197,13 +1331,39 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
                       <p className="text-[11px] text-slate-400">Manage, review, and celebrate answered intercessory points.</p>
                     </div>
 
+                    <div className="flex items-center gap-2">
+                      {/* Export CSV Button */}
+                      <button
+                        onClick={handleExportCSV}
+                        className="flex items-center gap-1.5 text-[10.5px] font-bold bg-[#112055] hover:bg-[#D4AF37] hover:text-[#0A0F1E] border border-[#D4AF37]/35 text-[#D4AF37] py-2 px-3 rounded-lg cursor-pointer transition"
+                        title="Export Diary Entries to Offline CSV log"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Export CSV</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search and filter control tray */}
+                  <div className="flex flex-col sm:flex-row items-center gap-3 bg-[#030611]/65 border border-slate-800/60 p-3 rounded-xl justify-between">
+                    <div className="relative w-full sm:w-64">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search title or content..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        className="w-full bg-[#050D1E] text-xs text-white pl-8 pr-3 py-2 rounded-lg border border-slate-800 focus:border-[#D4AF37] outline-none transition placeholder-slate-500"
+                      />
+                    </div>
+
                     {/* Filter controls */}
-                    <div className="flex items-center gap-1 bg-[#030611] border border-slate-800 p-0.5 rounded-lg">
+                    <div className="flex items-center gap-1 bg-[#050D1E] border border-slate-800 p-0.5 rounded-lg w-full sm:w-auto justify-end">
                       {(["All", "Active", "Answered"] as const).map(tabf => (
                         <button
                           key={tabf}
                           onClick={() => setJournalFilter(tabf)}
-                          className={`text-[10.5px] font-bold px-2.5 py-1.5 rounded transition cursor-pointer ${
+                          className={`text-[10.5px] font-bold px-3 py-1.5 rounded transition cursor-pointer ${
                             journalFilter === tabf 
                               ? "bg-[#D4AF37] text-black" 
                               : "text-slate-400 hover:text-white"

@@ -91,6 +91,8 @@ export default function BibleTools({ triggerToast, preferredVersion, setPreferre
     ]
   });
   const [isStudyLoading, setIsStudyLoading] = useState(false);
+  const [crossReferences, setCrossReferences] = useState<{ref: string, text: string, context: string}[] | null>(null);
+  const [isCrossLoading, setIsCrossLoading] = useState(false);
 
   // 3. Doctrine Checker State
   const [doctrineText, setDoctrineText] = useState("Faith alone is sufficient, works have absolutely zero relation to a believer's justification");
@@ -301,6 +303,50 @@ export default function BibleTools({ triggerToast, preferredVersion, setPreferre
       triggerToast("⚠️", "Network error. Loaded safe default.");
     } finally {
       setIsStudyLoading(false);
+    }
+  };
+
+  const handleGenerateCrossReferences = async () => {
+    if (!studyTopic.trim()) {
+      triggerToast("⚠️", "Please specify a study topic first.");
+      return;
+    }
+    setIsCrossLoading(true);
+    triggerToast("✨", "Interpreting scriptures for cross-references...");
+    try {
+      const res = await fetch("/api/gemini/cross-references", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: studyTopic })
+      });
+      const data = await res.json();
+      if (data.suggestions) {
+        setCrossReferences(data.suggestions);
+        triggerToast("📖", "Found three relevant cross-reference scriptures.");
+      } else {
+        throw new Error("No suggestions returned.");
+      }
+    } catch (e) {
+      triggerToast("⚠️", "Completed search with offline backup scriptures.");
+      setCrossReferences([
+        {
+          ref: "Galatians 2:20",
+          text: "I am crucified with Christ: nevertheless I live; yet not I, but Christ liveth in me...",
+          context: "Depicts the total surrender and Union with Christ that underpins any true spiritual life."
+        },
+        {
+          ref: "Romans 12:2",
+          text: "And be not conformed to this world: but be ye transformed by the renewing of your mind...",
+          context: "Outlines the continuous mental and moral alignment needed to separate from worldliness."
+        },
+        {
+          ref: "Colossians 3:1-2",
+          text: "If ye then be risen with Christ, seek those things which are above, where Christ sitteth on the right hand of God.",
+          context: "Instructs believers to elevate their focus to eternal, celestial realities rather than Earthly things."
+        }
+      ]);
+    } finally {
+      setIsCrossLoading(false);
     }
   };
 
@@ -594,10 +640,71 @@ export default function BibleTools({ triggerToast, preferredVersion, setPreferre
             <button
               onClick={handleBibleStudyGenerate}
               disabled={isStudyLoading}
-              className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-xs py-2 rounded-xl transition"
+              className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-xs py-2 rounded-xl transition cursor-pointer"
             >
               {isStudyLoading ? "Deliberating context..." : "Generate Study Outlines"}
             </button>
+
+            <div className="border-t border-white/5 pt-3.5 space-y-2">
+              <span className="text-[11px] font-bold text-[#D4AF37] uppercase tracking-wider block flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" /> AI Cross-References
+              </span>
+              <p className="text-[10px] text-slate-400 leading-normal">
+                Ask the Gemini API to suggest three additional scriptural cross-references relevant to "{studyTopic || 'topic'}".
+              </p>
+              <button
+                onClick={handleGenerateCrossReferences}
+                disabled={isCrossLoading || !studyTopic.trim()}
+                className="w-full bg-[#112055] hover:bg-[#D4AF37] hover:text-[#0A0F1E] border border-[#D4AF37]/45 text-[#D4AF37] text-xs font-bold py-2 rounded-xl transition duration-300 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+              >
+                {isCrossLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Searching celestial logs...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Suggest 3 Scriptures</span>
+                  </>
+                )}
+              </button>
+
+              {crossReferences && crossReferences.length > 0 && (
+                <div className="mt-3.5 space-y-2">
+                  {crossReferences.map((ref, i) => (
+                    <div key={i} className="bg-[#0A0F1E] border border-[#D4AF37]/25 p-2.5 rounded-xl text-xs space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-[#D4AF37] text-[11px] font-memo">{ref.ref}</span>
+                        <button
+                          onClick={() => {
+                            const exists = studyResult.keyVerses?.includes(ref.ref);
+                            if (exists) {
+                              triggerToast("⚠️", `"${ref.ref}" is already in your study guide anchor list!`);
+                            } else {
+                              setStudyResult((prev: any) => ({
+                                ...prev,
+                                keyVerses: [...(prev.keyVerses || []), ref.ref]
+                              }));
+                              triggerToast("📥", `Added "${ref.ref}" to study guide scriptures.`);
+                            }
+                          }}
+                          className="text-[#D4AF37]/80 hover:text-white text-[10px] font-semibold hover:underline cursor-pointer"
+                        >
+                          + Add to Guide
+                        </button>
+                      </div>
+                      <p className="italic text-slate-300 text-[11px] leading-relaxed">"{ref.text}"</p>
+                      {ref.context && (
+                        <p className="text-[10px] text-slate-400 font-light pt-0.5 border-t border-white/5">
+                          <span className="font-bold text-slate-300">Context:</span> {ref.context}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="md:col-span-2 bg-[#0A0F1E] border border-white/5 p-4 rounded-xl font-sans-raleway space-y-3">
