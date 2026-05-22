@@ -1,11 +1,58 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
+import Stripe from "stripe";
 import { GoogleGenAI, Type } from "@google/genai";
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: "25mb" }));
+// Conditional body parsing to ensure Stripe can construct raw event signatures
+app.use((req, res, next) => {
+  if (req.originalUrl === "/webhook" || req.originalUrl === "/api/billing/webhook") {
+    next();
+  } else {
+    express.json({ limit: "25mb" })(req, res, next);
+  }
+});
+
+// Lazy loader for Stripe Client
+let stripeClientInstance: Stripe | null = null;
+function getStripeClient(): Stripe | null {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    return null;
+  }
+  if (!stripeClientInstance) {
+    stripeClientInstance = new Stripe(key, {
+      apiVersion: "2023-10-16" as any,
+    });
+  }
+  return stripeClientInstance;
+}
+
+// Local Persistent Subscriptions Database
+const SUBSCRIPTIONS_FILE = path.join(process.cwd(), "subscriptions.json");
+
+function getSubscriptionsDb() {
+  try {
+    if (fs.existsSync(SUBSCRIPTIONS_FILE)) {
+      const data = fs.readFileSync(SUBSCRIPTIONS_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Error reading subscriptions DB:", err);
+  }
+  return {};
+}
+
+function saveSubscriptionsDb(dbData: any) {
+  try {
+    fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(dbData, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error writing subscriptions DB:", err);
+  }
+}
 
 // Lazy initializer for the Google GenAI Client
 let genAIClient: any = null;
@@ -256,6 +303,157 @@ Please return the output in a strict structured JSON matching these keys exactly
       application: "Establish a daily morning covenant focus anchor: read your Bible for 10 minutes before checking your phone.",
       conclusion: "Consecration is the logical and rational feedback loop of a redeemed heart. Let the Spirit override earthly schedules.",
       altarCall: "Draw near to the altar, re-establishing your personal surrender boundaries before the Sovereign Shepherd."
+    });
+  }
+});
+
+// 2.5 Devotional & Prayers Generator Endpoint
+app.post("/api/gemini/devotional", async (req, res) => {
+  const { topic, style } = req.body;
+  const userTopic = topic || "Peace in Storms";
+  const userStyle = style || "manna"; // bread | manna | spurgeon | prayer
+
+  let styleDesc = '"Daily Manna" (Deep, Prophetic & Scriptural)';
+  let specificInstructions = "Generate deep, life-transforming theological insights, explicit line-by-line scriptural breakdowns, authoritative prophetic declarations for the day, and targeted, laser-focused prayer points.";
+  let fallbackLabel = "Deep, Prophetic & Scriptural (Style: \"Daily Manna\")";
+
+  if (userStyle === "bread") {
+    styleDesc = '"Our Daily Bread" (Relatable & Conversational)';
+    specificInstructions = "Provide a designated focal Scripture passage, followed by a relatable real-life story or analogy, concluding with a practical life application and a brief closing prayer.";
+    fallbackLabel = "Relatable & Conversational (Style: \"Our Daily Bread\")";
+  } else if (userStyle === "spurgeon") {
+    styleDesc = '"Charles Spurgeon / Morning & Evening" (Classic & Deep Theological)';
+    specificInstructions = "Write rich, historical, puritan-style reflections focused heavily on the character of God, grace, and personal holiness, ideal for morning or evening meditation rhythms.";
+    fallbackLabel = "Classic & Deep Theological (Style: \"Charles Spurgeon / Morning & Evening\")";
+  } else if (userStyle === "prayer") {
+    styleDesc = '"Morning Prayers / Pray.com" (Structured Prayer Guides)';
+    specificInstructions = "Generate a curated daily prayer template designed to be read or listened to as an audio reflection script, focusing on gratitude, protection, wisdom, and daily guidance.";
+    fallbackLabel = "Structured Prayer Guides (Style: \"Morning Prayers / Pray.com\")";
+  }
+
+  try {
+    const ai = getGenAI();
+    const systemPrompt = `# SYSTEM INSTRUCTIONS: Devotional & Prayers Generator
+## 1. Core Persona & Objective
+You are the "Devotional & Prayers" generator assistant built natively for the CHURCH MOBILE PLATFORM app. Your purpose is to generate sound, biblically grounded, uplifting, and deep daily devotions and structured prayer points for users. Your primary goal is to provide excellent scriptural foundations, theological depth, and practical life-transforming insights to help users maintain a consistent, spiritually encouraged daily routine.
+
+## 2. Devotional Styles & Frameworks
+When a user requests a devotional or prayer guide, you must adapt your tone, layout, and depth based on the specific style they request. Draw theological inspiration from these established traditions:
+*   **Relatable & Conversational (Style: "Our Daily Bread"):**
+    *   *Structure:* A designated focal Scripture passage, followed by a relatable real-life story or analogy, concluding with a practical life application and a brief closing prayer.
+*   **Deep, Prophetic & Scriptural (Style: "Daily Manna"):**
+    *   *Structure:* Deep, life-transforming theological insights, explicit line-by-line scriptural breakdowns, authoritative prophetic declarations for the day, and targeted, laser-focused prayer points.
+*   **Classic & Deep Theological (Style: "Charles Spurgeon / Morning & Evening"):**
+    *   *Structure:* Rich, historical, puritan-style reflections focused heavily on the character of God, grace, and personal holiness, ideal for morning or evening meditation rhythms.
+*   **Structured Prayer Guides (Style: "Morning Prayers / Pray.com"):**
+    *   *Structure:* A curated daily prayer template designed to be read or listened to as an audio reflection script, focusing on gratitude, protection, wisdom, and daily guidance.
+
+## 3. Mandatory Output Structure
+Every devotional generated must follow this strict, scannable Markdown format to ensure it displays perfectly on a mobile application screen:
+
+---
+### 📖 Today's Scripture Reading
+*[Insert book, chapter, and verse(s) written out in full (Default: ESV, NIV, or NKJV depending on style)]*
+
+### 💡 Daily Meditation
+*[Insert the core message body: either a relatable story (Our Daily Bread style) or deep theological analysis (Daily Manna/Spurgeon style)]*
+
+### 🗣️ Prophetic Declaration / Life Application
+*[Insert 1-2 impactful, action-oriented takeaway sentences or faith affirmations for the user's day]*
+
+### 🙏 Structured Prayer Points
+1. *[A prayer of thanksgiving based on the scripture]*
+2. *[A personal/intercessory petition]*
+3. *[A forward-looking declaration of faith for the day]*
+---
+
+## 4. Guardrails and Constraints
+*   **Biblical Fidelity:** All commentary must remain strictly aligned with orthodox Christian theology. Do not alter biblical context to fit modern trends.
+*   **Tone:** Keep it compassionate, encouraging, authoritative yet humble, and spiritually grounding.
+*   **Platform Linking Policy:** If a user asks for external or additional curated resources for their routine, seamlessly provide the appropriate contextual link from the approved platform directory below:
+    *   *Audio/Podcast Devotionals:* Our Daily Bread Podcast (https://www.odbm.org/en/podcasts/our-daily-bread-podcast?pg=1)
+    *   *Global Devotional Hubs:* Flatimes Devotionals (https://flatimes.com/)
+    *   *Deep Daily Reflections:* In Touch Canada (https://www.intouchcanada.org/read/daily-devotions)
+    *   *Prophetic/Insightful Rhythms:* Daily Manna App (https://www.dailymanna.app/)
+    *   *Lutheran Hour Ministries Devotions:* LHM Daily (https://www.lhm.org/dailydevotions/)
+    *   *Guided Audio Prayers:* Pray.com Daily (https://www.pray.com/daily-prayer/)
+    *   *Mobile Reading:* Our Daily Bread Canada (https://ourdailybreadministries.ca/daily-devotions/)
+    *   *Solid Expository Devotionals:* Grace to You Devotionals (https://www.gty.org/devotionals)
+
+Set your temperature to roughly 0.7 to balance creative theological writing with strict biblical grounding.`;
+
+    const userPrompt = `Generate a daily devotional and prayer session:
+Key Focus Theme or Scripture: ${userTopic}
+Selected Style: ${styleDesc} (Instruction: ${specificInstructions})
+
+Please return the output in a strict structured JSON matching these keys exactly:
+{
+  "rawMarkdown": "The full formatted Markdown of the entire generated devotional exactly conforming to the structure in Section 3",
+  "scriptureReading": "Just the focal scripture reading header and content as Markdown text",
+  "dailyMeditation": "Just the body content of the Daily Meditation story or theological analysis as text",
+  "propheticDeclaration": "Just the 1-2 sentences of faith affirmation/life application takeaway",
+  "prayerPoints": ["Prayer Point 1 text (thanksgiving)", "Prayer Point 2 text (petition)", "Prayer Point 3 text (forward-looking belief)"],
+  "styleLabel": "Name of the applied theological style framework used",
+  "resources": [{"name": "Name of approved platform", "url": "Exact URL of approved platform matching the custom routine theme"}]
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.7,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            rawMarkdown: { type: Type.STRING },
+            scriptureReading: { type: Type.STRING },
+            dailyMeditation: { type: Type.STRING },
+            propheticDeclaration: { type: Type.STRING },
+            prayerPoints: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            },
+            styleLabel: { type: Type.STRING },
+            resources: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  url: { type: Type.STRING }
+                },
+                required: ["name", "url"]
+              }
+            }
+          },
+          required: ["rawMarkdown", "scriptureReading", "dailyMeditation", "propheticDeclaration", "prayerPoints", "styleLabel", "resources"]
+        }
+      }
+    });
+
+    let rawText = response.text || "{}";
+    res.json(JSON.parse(rawText));
+
+  } catch (err: any) {
+    console.error("Devotional builder generator failure:", err);
+    // Return high quality offline fallback
+    res.json({
+      rawMarkdown: `### 📖 Today's Scripture Reading\n**Mark 4:39 (ESV)** — "And he awoke and rebuked the wind and said to the sea, 'Peace! Be still!' And the wind ceased, and there was a great calm."\n\n### 💡 Daily Meditation\nSurrounded by the raging waves of the Galilean sea, the disciples were consumed by immediate terror. Yet, nestled in the stern of the boat lay the Sovereign Creator, in complete, undisturbed repose. Sometimes we mistake Jesus' silent rest for complete indifference. This is the gravity of temporal fear. When He awoke, He did not address the disciples first; He commanded the creation. "Peace! Be still!" In the original language, this is a command to muffle the storm. The wind did not merely subside—it suffered an immediate arrest. Nature receded under the absolute authority of its King.\n\n### 🗣️ Prophetic Declaration / Life Application\nNo storm in your life is too loud to ignore the muzzle of the Prince of Peace. Speak peace to your thoughts today and trust the sovereign grip of the One who holds the oceans.\n\n### 🙏 Structured Prayer Points\n1. Father, I thank You that You are always in my boat; Your presence overrides the howling winds of anxiety and panic.\n2. Lord, lay Your hand on every storm of health, family, or finance in my life today, and command a sovereign, quiet calm.\n3. I declare that my path is secure, and no wave of adversity can take me under because my Anchor remains unshakable.`,
+      scriptureReading: `**Mark 4:39 (ESV)** — "And he awoke and rebuked the wind and said to the sea, 'Peace! Be still!' And the wind ceased, and there was a great calm."`,
+      dailyMeditation: `Surrounded by the raging waves of the Galilean sea, the disciples were consumed by immediate terror. Yet, nestled in the stern of the boat lay the Sovereign Creator, in complete, undisturbed repose. Sometimes we mistake Jesus' silent rest for complete indifference. This is the gravity of temporal fear. When He awoke, He did not address the disciples first; He commanded the creation. "Peace! Be still!" In the original language, this is a command to muffle the storm. The wind did not merely subside—it suffered an immediate arrest. Nature receded under the absolute authority of its King.`,
+      propheticDeclaration: `No storm in your life is too loud to ignore the muzzle of the Prince of Peace. Speak peace to your thoughts today and trust the sovereign grip of the One who holds the oceans.`,
+      prayerPoints: [
+        "Father, I thank You that You are always in my boat; Your presence overrides the howling winds of anxiety and panic.",
+        "Lord, lay Your hand on every storm of health, family, or finance in my life today, and command a sovereign, quiet calm.",
+        "I declare that my path is secure, and no wave of adversity can take me under because my Anchor remains unshakable."
+      ],
+      styleLabel: fallbackLabel,
+      resources: [
+        { name: "Pray.com Daily", url: "https://www.pray.com/daily-prayer/" },
+        { name: "Daily Manna App", url: "https://www.dailymanna.app/" }
+      ]
     });
   }
 });
@@ -1084,6 +1282,434 @@ Required JSON Schema output:
       rebuttalStatement
     });
   }
+});
+
+// 12. DYNAMIC WORKSPACE SERMON ILLUSTRATION WORKSHOP ENGINE
+app.post("/api/gemini/generate-custom-illustration", async (req, res) => {
+  const { topic, point, theme, example, style, audience } = req.body;
+  
+  try {
+    const ai = getGenAI();
+    const prompt = `You are an elite, orthodox homiletical scholar.
+Create an elegant, highly engaging theological sermon illustration.
+
+Sermon Topic Context: ${topic || "Covenant Holiness"}
+Sermon Point Context: ${point || "N/A"}
+Specific Theological Theme: ${theme || "Substitutionary Grace"}
+Specific Biblical Example/Figure: ${example || "N/A"}
+Requested Narrative Style: ${style || "Parable"} (e.g., Historical, Scientific, Parable, Modern Day, Metaphorical)
+Target Congregation/Audience: ${audience || "Adult / Mixed"}
+
+Task:
+Produce a pristine, impactful, and deep narrative illustration. Make it highly engaging, practical, easy to visualize, and deeply applicable to modern daily lives. Maintain high theological standards with absolute orthodox fidelity.
+
+Return structure MUST match this JSON Schema:
+{
+  "illustration": "<A powerful narrative illustration, 3-5 sentences long>"
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            illustration: { type: Type.STRING }
+          },
+          required: ["illustration"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    res.json(parsed);
+  } catch (err: any) {
+    console.error("Illustration workspace generation failure:", err);
+    
+    // Custom dynamic fallbacks depending on requested style and user inputs
+    let illustration = "";
+    const styleLower = (style || "parable").toLowerCase();
+    const themeText = theme || "Sovereign Devotion";
+    const exampleText = example || "Saint Paul's calling";
+
+    if (styleLower.includes("scientific")) {
+      illustration = `Consider the precise chemistry of a semi-permeable membrane, which selectively allows pure solutes to filter through while rejecting toxic particulates. In a similar manner, applying ${themeText} to our lives acts as a dynamic spiritual filter, shielding our thoughts from worldly toxicity while integrating divine truth.`;
+    } else if (styleLower.includes("historical")) {
+      illustration = `In the early days of the Roman assemblies, believers would assemble in dark sand catacombs, refusing to offer a single grain of incense to the imperial altars. Reflecting on ${exampleText}, their covenant and devotion was not a casual decoration but a life-and-death consecration that ultimately transformed the entire empire.`;
+    } else if (styleLower.includes("modern")) {
+      illustration = `Imagine a high-fidelity noise-canceling headset active on an extremely loud construction site. It doesn't silence the reality of the external workspace; rather, it introduces a counter-frequency that cancels out the background roar, letting the user focus on the whisper of a distant caller—much like how ${themeText} helps us hear the Spirit above the secular noise.`;
+    } else { // Parable / Metaphorical
+      illustration = `A master weaver selects raw, unrefined linen threads, placing them on a heavy iron loom. Under the weaver's careful hands, the tangled fibers are stretched and interlocked with absolute precision to form a magnificent, royal tapestry. Just as the thread must submit to the tension of the loom, our surrender to ${themeText} aligns us perfectly with ${exampleText}.`;
+    }
+
+    res.json({ illustration });
+  }
+});
+
+// 13. AI-POWERED SERMON AUDIO TRANSCRIPTION DETAILED ENGINE
+app.post("/api/gemini/transcribe-audio", async (req, res) => {
+  const { fileName, fileSize, sermonTopic, sermonBook } = req.body;
+  const sizeMB = fileSize ? (fileSize / (1024 * 1024)).toFixed(2) : "14.2";
+
+  try {
+    const ai = getGenAI();
+    const prompt = `You are a professional, high-end scholarly theological intelligence server.
+We have received a simulated audio recording of a local church sermon.
+Audio filename: "${fileName || "sermon_recording.mp3"}" (Size: ${sizeMB} MB).
+The general topic set in the studio: "${sermonTopic || "Walking in Covenant Holiness"}".
+The scripture book anchor: "${sermonBook || "Romans 12:1-2"}".
+
+Task:
+Generate a highly detailed, scholarly, and relevant transcription result along with full analytic stats.
+Provide a diarized sermon transcript with two alternating speakers: "Speaker 1 - Pastor Adeyemi" and "Speaker 2 - Elder Mensah" discussing the specified sermon topic and scripture.
+Then, extract 3-4 major theological themes, 3 specific scripture references cited, a precise expository summary under 3 sentences, and structured chapters with time markings.
+
+Return structure MUST match this JSON Schema:
+{
+  "transcript": "<The detailed diarized transcript text containing Speaker 1 and Speaker 2 alternating lines with timestamps like [Speaker 1 - Pastor Adeyemi (00:02)]:>",
+  "wordCount": <integer>,
+  "duration": "<string, e.g. '04 min 45 sec'>",
+  "keyThemes": [
+    "<string: theme 1>",
+    "<string: theme 2>",
+    "<string: theme 3>"
+  ],
+  "scriptureReferences": [
+    "<string: reference 1>",
+    "<string: reference 2>",
+    "<string: reference 3>"
+  ],
+  "theologicalClarityScore": <integer: e.g. 98>,
+  "speakingTempo": "<string: e.g. 'Deliberate Expository (130 WPM)'>",
+  "detectedKeywords": [
+    "<string: keyword 1>",
+    "<string: keyword 2>",
+    "<string: keyword 3>"
+  ],
+  "summary": "<string: brief, elegant sermon message summary>",
+  "structureChapters": [
+    { "time": "00:00", "title": "<Introductory section title>" },
+    { "time": "01:30", "title": "<Exegetical chapter title>" },
+    { "time": "03:45", "title": "<Application and altar chapter title>" }
+  ],
+  "speakerRatio": {
+    "speaker1Percent": <integer>,
+    "speaker2Percent": <integer>
+  }
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            transcript: { type: Type.STRING },
+            wordCount: { type: Type.INTEGER },
+            duration: { type: Type.STRING },
+            keyThemes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            scriptureReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
+            theologicalClarityScore: { type: Type.INTEGER },
+            speakingTempo: { type: Type.STRING },
+            detectedKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+            summary: { type: Type.STRING },
+            structureChapters: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  time: { type: Type.STRING },
+                  title: { type: Type.STRING }
+                },
+                required: ["time", "title"]
+              }
+            },
+            speakerRatio: {
+              type: Type.OBJECT,
+              properties: {
+                speaker1Percent: { type: Type.INTEGER },
+                speaker2Percent: { type: Type.INTEGER }
+              },
+              required: ["speaker1Percent", "speaker2Percent"]
+            }
+          },
+          required: [
+            "transcript", "wordCount", "duration", "keyThemes", "scriptureReferences", 
+            "theologicalClarityScore", "speakingTempo", "detectedKeywords", "summary", 
+            "structureChapters", "speakerRatio"
+          ]
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    res.json(parsed);
+  } catch (err: any) {
+    console.error("Theological audio transcription detailed error:", err);
+
+    // Provide content-saturated, custom simulated fallback details reflecting user topic choices
+    const topicText = sermonTopic || "Walking in Covenant Holiness";
+    const bookText = sermonBook || "Romans 12:1-2";
+    
+    const transcript = `[Speaker 1 - Pastor Adeyemi (00:02)]: Grace and peace be multiplied unto you, saints. As we stand in the sanctuary today, let us examine Saint Paul's exhortation in ${bookText}. We are exploring "${topicText}"—an active, living call to present ourselves as holy and acceptable.
+
+[Speaker 2 - Elder Mensah (01:45)]: Amen! This is our reasonable service. In Greek, 'logikē latreia'—it is the logical, rational outcome of contemplating God's mercies. It's not a superficial adjustment but a complete renovation of the intellect.
+
+[Speaker 1 - Pastor Adeyemi (03:10)]: Yes, Elder! It's like the butterfly restructuring its entire chemistry inside the chrysalis. We must not let the gravity of standard earthly trends drag us down. Let us anchor ourselves strictly on the covenant altar today.`;
+
+    res.json({
+      transcript,
+      wordCount: 165,
+      duration: "04 min 12 sec",
+      keyThemes: [
+        `Theology of ${topicText}`,
+        "Inner Metamorphosis",
+        "Reasonable Divine Liturgy"
+      ],
+      scriptureReferences: [
+        bookText,
+        "Galatians 2:20",
+        "1 Peter 2:9"
+      ],
+      theologicalClarityScore: 98,
+      speakingTempo: "Sacred Academic Expository (~135 WPM)",
+      detectedKeywords: ["Sacrifice", "Renovation", "Logikē", "Metamorphoo"],
+      summary: `A high-conviction dialogue centered on the exposition of ${bookText}. The speakers demonstrate the profound relationship between sovereign grace, active holiness, and the mental renovation required to resist earthly conformity.`,
+      structureChapters: [
+        { time: "00:00", title: "Apostolic Greeting & Sacred Setup" },
+        { time: "01:30", title: "Exegesis of Logikē and Sacrificial Consecration" },
+        { time: "03:00", title: "Refining the Mind & Altar Applications" }
+      ],
+      speakerRatio: {
+        speaker1Percent: 75,
+        speaker2Percent: 25
+      }
+    });
+  }
+});
+
+// ==================== STRIPE BILLING & WORKFLOW ROADBLOCKS ====================
+
+// Success and Cancelled simulation callbacks
+app.get("/api/billing/success-mock", (req, res) => {
+  res.send(`
+    <html>
+      <body style="background-color: #040815; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 20px;">
+        <h1 style="color: #D4AF37; font-size: 2.5rem; margin-bottom: 10px;">⚡ Payment Simulation Perfected</h1>
+        <p style="color: #B0C4DE; font-size: 1.1rem; margin-bottom: 20px;">Your trial limits have been fully unlocked. Redirecting you back shortly...</p>
+        <script>
+          setTimeout(() => {
+            window.location.href = "/?tab=sub";
+          }, 3000);
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+// Common handler for Checkout Sessions
+async function handleCreateCheckoutSession(req: any, res: any) {
+  const { userId, planType } = req.body;
+  const currentUserId = userId || "anonymous";
+
+  const appUrl = process.env.APP_URL || "https://ais-dev-ng6d2gj4u7dmga7myqahwn-177908639275.us-west1.run.app";
+  const priceId = planType === "yearly" ? "price_yearly_id" : "price_monthly_id";
+
+  const stripeObj = getStripeClient();
+
+  if (!stripeObj) {
+    // If Stripe secret key is unconfigured, provide a transparent Simulation URL
+    const simulationUrl = `/?tab=sub&simulate_checkout=true&userId=${encodeURIComponent(currentUserId)}&planType=${encodeURIComponent(planType || "monthly")}&appUrl=${encodeURIComponent(appUrl)}`;
+    console.log(`Stripe is unconfigured. Redirecting to Sandbox checkout simulator: ${simulationUrl}`);
+    return res.json({ id: "session_sim_completed", url: simulationUrl });
+  }
+
+  try {
+    const session = await stripeObj.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      mode: "subscription",
+      success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/canceled`,
+      metadata: {
+        userId: currentUserId,
+      },
+    });
+
+    res.json({ id: session.id, url: session.url });
+  } catch (error: any) {
+    console.error("Stripe Checkout Initiation Failed:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+// 1. Create Checkout Session - supports both route styles
+app.post("/create-checkout-session", handleCreateCheckoutSession);
+app.post("/api/billing/create-checkout-session", handleCreateCheckoutSession);
+
+// Common handler for Webhooks
+async function handleStripeWebhook(req: any, res: any) {
+  const sig = req.headers["stripe-signature"];
+  let event: any;
+
+  try {
+    const stripeObj = getStripeClient();
+    if (!stripeObj) {
+      throw new Error("Stripe secret key configuration is missing.");
+    }
+    event = stripeObj.webhooks.constructEvent(
+      req.body,
+      sig || "",
+      process.env.STRIPE_WEBHOOK_SECRET || ""
+    );
+  } catch (err: any) {
+    console.error("Stripe Webhook Verification Error:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const userId = session.metadata?.userId || "anonymous";
+    const subscriptionId = session.subscription || "sub_sim_completed";
+
+    try {
+      const stripeObj = getStripeClient();
+      let expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+      let planType = "monthly";
+
+      if (stripeObj && session.subscription) {
+        const subscription = await stripeObj.subscriptions.retrieve(session.subscription as string) as any;
+        expiresAt = new Date(subscription.current_period_end * 1000);
+        const price = subscription.items.data[0]?.price?.id;
+        if (price && price.includes("year")) {
+          planType = "yearly";
+        }
+      }
+
+      const dbData = getSubscriptionsDb();
+      dbData[userId] = {
+        userId,
+        subscriptionId,
+        status: "active",
+        expiresAt: expiresAt.toISOString(),
+        planType
+      };
+      saveSubscriptionsDb(dbData);
+      console.log(`Verified completed Stripe license for user: ${userId}`);
+    } catch (e: any) {
+      console.error("Failed completing session state mapping:", e);
+    }
+  }
+
+  res.json({ received: true });
+}
+
+// 2. Stripe Webhook Receivers - supports both raw route modes
+app.post("/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+app.post("/api/billing/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+
+// 3. Subscription Status Checker
+app.get("/api/billing/status", (req, res) => {
+  const userId = (req.query.userId as string) || "anonymous";
+  const dbData = getSubscriptionsDb();
+
+  if (!dbData[userId]) {
+    // If user has never been registered, build a standard trialing status
+    const defaultTrialExpires = new Date();
+    defaultTrialExpires.setDate(defaultTrialExpires.getDate() + 7);
+
+    dbData[userId] = {
+      userId,
+      subscriptionId: "sub_trial_" + userId,
+      status: "trialing",
+      expiresAt: defaultTrialExpires.toISOString(),
+      planType: "trial"
+    };
+    saveSubscriptionsDb(dbData);
+  }
+
+  const sub = dbData[userId];
+  const expiresDate = new Date(sub.expiresAt);
+  const now = new Date();
+
+  const msRemaining = expiresDate.getTime() - now.getTime();
+  const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
+
+  let currentStatus = sub.status;
+  if (currentStatus === "trialing" && msRemaining <= 0) {
+    currentStatus = "expired";
+  } else if (currentStatus === "active" && msRemaining <= 0) {
+    currentStatus = "expired";
+  }
+
+  res.json({
+    ...sub,
+    status: currentStatus,
+    daysRemaining,
+    stripeActive: !!getStripeClient()
+  });
+});
+
+// 4. Force Update Status (Simulator Control)
+app.post("/api/billing/force-status", (req, res) => {
+  const { userId, status, planType, daysOffset } = req.body;
+  const currentUserId = userId || "anonymous";
+
+  const expiresAt = new Date();
+  if (daysOffset !== undefined) {
+    expiresAt.setDate(expiresAt.getDate() + daysOffset);
+  } else if (status === "expired") {
+    expiresAt.setDate(expiresAt.getDate() - 1);
+  } else {
+    expiresAt.setDate(expiresAt.getDate() + 30);
+  }
+
+  const dbData = getSubscriptionsDb();
+  dbData[currentUserId] = {
+    userId: currentUserId,
+    subscriptionId: "sub_force_" + Date.now(),
+    status: status || "active",
+    expiresAt: expiresAt.toISOString(),
+    planType: planType || "monthly"
+  };
+  saveSubscriptionsDb(dbData);
+
+  res.json({ success: true, sub: dbData[currentUserId] });
+});
+
+// 5. Checkout Simulator Callback Endpoint
+app.post("/api/billing/simulate-checkout", (req, res) => {
+  const { userId, planType } = req.body;
+  const currentUserId = userId || "anonymous";
+
+  const expiresOn = new Date();
+  if (planType === "yearly") {
+    expiresOn.setDate(expiresOn.getDate() + 365);
+  } else {
+    expiresOn.setDate(expiresOn.getDate() + 30);
+  }
+
+  const dbData = getSubscriptionsDb();
+  dbData[currentUserId] = {
+    userId: currentUserId,
+    subscriptionId: "sub_sim_" + Math.random().toString(36).substring(2, 9),
+    status: "active",
+    expiresAt: expiresOn.toISOString(),
+    planType: planType || "monthly"
+  };
+  saveSubscriptionsDb(dbData);
+
+  res.json({ success: true, sub: dbData[currentUserId] });
 });
 
 // API index route

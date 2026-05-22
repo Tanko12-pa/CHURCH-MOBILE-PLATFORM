@@ -107,6 +107,43 @@ service cloud.firestore {
         && data.status is string && (data.status == 'Sent' || data.status == 'Scheduled' || data.status == 'Draft');
     }
 
+    // Devotional Session validation
+    function isValidDevotionalSession(data) {
+      return data.keys().hasAll(['id', 'userId', 'topic', 'styleLabel', 'scriptureReading', 'dailyMeditation', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.topic is string && data.topic.size() <= 256
+        && data.styleLabel is string && data.styleLabel.size() <= 128
+        && data.scriptureReading is string && data.scriptureReading.size() <= 4096
+        && data.dailyMeditation is string && data.dailyMeditation.size() <= 16384
+        && (!data.keys().contains('propheticDeclaration') || (data.propheticDeclaration is string && data.propheticDeclaration.size() <= 2048))
+        && (!data.keys().contains('prayerPoints') || (data.prayerPoints is list && data.prayerPoints.size() <= 20))
+        && data.createdAt is string;
+    }
+
+    // Prayer Journal Entry validation
+    function isValidPrayerJournalEntry(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'request', 'status', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.title is string && data.title.size() <= 256
+        && data.request is string && data.request.size() <= 8192
+        && data.status is string && (data.status == 'Active' || data.status == 'Answered')
+        && data.createdAt is string
+        && (!data.keys().contains('answeredAt') || data.answeredAt is string);
+    }
+
+    // Reminder Setting validation
+    function isValidReminderSetting(data) {
+      return data.keys().hasAll(['id', 'userId', 'hour', 'minute', 'enabled'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.hour is int && data.hour >= 0 && data.hour <= 23
+        && data.minute is int && data.minute >= 0 && data.minute <= 59
+        && data.enabled is bool
+        && (!data.keys().contains('updatedAt') || data.updatedAt is string);
+    }
+
 
     // 4. COLLECTION ROUTING & HARDENING
 
@@ -152,6 +189,33 @@ service cloud.firestore {
       allow get, list: if isEmailVerified();
       allow create, update: if isEmailVerified() && isValidId(emailId) && isValidSentEmail(incoming());
       allow delete: if isBootstrappedAdmin() && isValidId(emailId);
+    }
+
+    // Devotion History collection
+    match /devotions/{devotionId} {
+      allow get: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow list: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isEmailVerified() && isValidId(devotionId) && isValidDevotionalSession(incoming());
+      allow update: if isEmailVerified() && isValidId(devotionId) && isValidDevotionalSession(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isEmailVerified() && isValidId(devotionId) && existing().userId == request.auth.uid;
+    }
+
+    // Prayer Journal collection
+    match /journal/{journalId} {
+      allow get: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow list: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isEmailVerified() && isValidId(journalId) && isValidPrayerJournalEntry(incoming());
+      allow update: if isEmailVerified() && isValidId(journalId) && isValidPrayerJournalEntry(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isEmailVerified() && isValidId(journalId) && existing().userId == request.auth.uid;
+    }
+
+    // Daily Prayer Reminders collection
+    match /reminders/{reminderId} {
+      allow get: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow list: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isEmailVerified() && isValidId(reminderId) && isValidReminderSetting(incoming());
+      allow update: if isEmailVerified() && isValidId(reminderId) && isValidReminderSetting(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isEmailVerified() && isValidId(reminderId) && existing().userId == request.auth.uid;
     }
   }
 }

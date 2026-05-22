@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   Flame, Clock, ChevronRight, LayoutDashboard, Calendar, Users, ShieldAlert, BadgeInfo,
   Sliders, Bot, Globe, ShieldCheck, Mail, Volume2, Sparkles, BookOpen, AlertTriangle,
-  Shield, Crown, Star, Sun, Heart, Check, Save, LogIn, LogOut, CloudLightning, ShieldOff
+  Shield, Crown, Star, Sun, Heart, Check, Save, LogIn, LogOut, CloudLightning, ShieldOff, CreditCard
 } from "lucide-react";
 
 import { 
@@ -20,10 +20,11 @@ import SermonPrepStudio from "./components/SermonPrepStudio";
 import BibleTools from "./components/BibleTools";
 import ChurchManagement from "./components/ChurchManagement";
 import MediaComm from "./components/MediaComm";
+import DevotionalPrayers from "./components/DevotionalPrayers";
 
 export default function App() {
   // Global active tab state
-  const [activeTab, setActiveTab] = useState<"dashboard" | "calendar" | "bible" | "prep" | "management" | "media" | "sub" | "settings">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "calendar" | "bible" | "prep" | "management" | "media" | "sub" | "settings" | "devotional">("dashboard");
 
   // Toasts
   const [toast, setToast] = useState<{ icon: string; msg: string } | null>(null);
@@ -94,6 +95,111 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Stripe Billing & Subscription state variables
+  const [subscription, setSubscription] = useState<{
+    userId: string;
+    subscriptionId: string;
+    status: "active" | "trialing" | "canceled" | "expired";
+    expiresAt: string;
+    planType: "trial" | "monthly" | "yearly";
+    daysRemaining: number;
+    stripeActive?: boolean;
+  } | null>(null);
+  const [subLoading, setSubLoading] = useState(true);
+
+  // Load and refresh subscription level from server DB
+  const refreshSubscriptionStatus = async (uid?: string) => {
+    const currentUid = uid || user?.uid || "anonymous_user";
+    try {
+      const res = await fetch(`/api/billing/status?userId=${encodeURIComponent(currentUid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSubscription(data);
+      }
+    } catch (e) {
+      console.error("Failed fetching subscription level:", e);
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  const forceSubscriptionStatus = async (status: string, planType: string, daysOffset?: number) => {
+    const userId = user?.uid || "anonymous_user";
+    setSubLoading(true);
+    try {
+      const res = await fetch("/api/billing/force-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, status, planType, daysOffset })
+      });
+      if (res.ok) {
+        triggerToast("🛡️", `Billing system updated status to [${status.toUpperCase()}]`);
+        await refreshSubscriptionStatus(userId);
+      }
+    } catch (e: any) {
+      triggerToast("⚠️", `Force update issue: ${e.message}`);
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  const handleSubscribe = async (planType: "monthly" | "yearly") => {
+    const userId = user?.uid || "anonymous_user";
+    triggerToast("💳", `Initiating secure ${planType} checkout session...`);
+    try {
+      const res = await fetch("/api/billing/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, planType })
+      });
+      const session = await res.json();
+      if (session.url) {
+        // Direct redirection to the checkout page (either real Stripe or our local interactive simulator!)
+        window.location.href = session.url;
+      } else {
+        triggerToast("⚠️", "Failed to initiate payment pipeline. Please try again.");
+      }
+    } catch (e: any) {
+      triggerToast("❌", `Routing issue: ${e.message}`);
+    }
+  };
+
+  const handleSimulatePaymentComplete = async (pType: string) => {
+    const userId = user?.uid || "anonymous_user";
+    setSubLoading(true);
+    try {
+      const res = await fetch("/api/billing/simulate-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, planType: pType })
+      });
+      if (res.ok) {
+        triggerToast("✓", "Simulated card authorization complete! Core workspace limits completely unlocked.");
+        // Clear query parameters elegantly without reload
+        const newUrl = window.location.origin + window.location.pathname + "?tab=sub";
+        window.history.replaceState({}, document.title, newUrl);
+        await refreshSubscriptionStatus(userId);
+      }
+    } catch (e: any) {
+      triggerToast("❌", `Failed complete simulation: ${e.message}`);
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSubscriptionStatus(user?.uid);
+  }, [user]);
+
+  // Hook to handle checkout simulation and check query params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasSim = params.get("simulate_checkout") === "true";
+    if (hasSim) {
+      setActiveTab("sub");
+    }
+  }, []);
 
   // Raw states with initial mock data fallback
   const [members, rawSetMembers] = useState<Member[]>([
@@ -501,7 +607,8 @@ export default function App() {
               </span>
               {[
                 { id: "bible", label: "Bible Study Suite", icon: BookOpen },
-                { id: "prep", label: "Sermon Preparation", icon: Volume2 }
+                { id: "prep", label: "Sermon Preparation", icon: Volume2 },
+                { id: "devotional", label: "Devotional & Prayers", icon: Flame }
               ].map(item => (
                 <button
                   key={item.id}
@@ -513,7 +620,7 @@ export default function App() {
                   }`}
                 >
                   <span className="flex items-center gap-2 font-semibold">
-                    <item.icon className="w-3.5 h-3.5 animate-pulse" /> {item.label}
+                    <item.icon className="w-3.5 h-3.5" /> {item.label}
                   </span>
                   <ChevronRight className="w-3 h-3 opacity-60" />
                 </button>
@@ -592,6 +699,85 @@ export default function App() {
 
         {/* DYNAMIC SCENE PANELS */}
         <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-6">
+          
+          {/* Trial Expiration Overlay Paywall Block */}
+          {subscription?.status === "expired" && activeTab !== "sub" && activeTab !== "settings" ? (
+            <div id="subscription-paywall" className="paywall-container max-w-2xl mx-auto border border-red-500/30 bg-[#0D0B12] p-8 rounded-3xl gold-glow animate-fade-in space-y-6 text-center shadow-2xl relative overflow-hidden mt-6">
+              <div className="absolute inset-0 bg-radial-gradient from-red-500/5 to-transparent pointer-events-none" />
+              <div className="mx-auto w-16 h-16 bg-red-950/40 border border-red-500/40 rounded-full flex items-center justify-center text-red-100">
+                <ShieldAlert className="w-8 h-8 text-rose-500" />
+              </div>
+              
+              <div className="space-y-2">
+                <span className="text-[10px] font-mono text-red-400 bg-red-950/40 border border-red-900/30 px-3 py-1 rounded-full uppercase tracking-widest font-bold">
+                  Trial Access Terminated
+                </span>
+                <h2 className="text-2xl font-serif-cinzel font-bold text-white tracking-wide">
+                  Your 7-Day Free Trial Has Expired
+                </h2>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  Select a subscription package below to keep automated pulpit workflows, expository outlines, and diarized theological analyses running smoothly.
+                </p>
+              </div>
+
+              {/* Billing Cards Suite integrated immediately inside paywall */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 max-w-lg mx-auto">
+                <div className="bg-[#07050B] border border-white/5 p-5 rounded-2xl flex flex-col justify-between hover:border-white/10 transition duration-150">
+                  <div className="text-left">
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">Shepherd Monthly</span>
+                    <h3 className="text-base font-bold text-white mt-1">Standard Monthly</h3>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Full access to pulpit outline builders, Bible study components, and transcription details.
+                    </p>
+                  </div>
+                  <div className="pt-4 border-t border-white/5 mt-4">
+                    <p className="text-sm font-extrabold text-[#D4AF37] mb-3">$9.99 / month</p>
+                    <button
+                      onClick={() => handleSubscribe("monthly")}
+                      className="w-full bg-[#112055] hover:bg-[#112055]/80 border border-[#D4AF37]/35 text-white py-2 px-4 rounded-lg text-xs font-bold transition cursor-pointer"
+                    >
+                      Subscribe Monthly
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-[#05060F]/80 border border-[#D4AF37]/45 p-5 rounded-2xl flex flex-col justify-between hover:border-[#D4AF37] transition duration-150 relative overflow-hidden">
+                  <div className="absolute top-2 right-2 bg-[#D4AF37] text-black text-[7px] uppercase tracking-wider font-black px-1.5 py-0.5 rounded font-mono">
+                    Best Value
+                  </div>
+                  <div className="text-left">
+                    <span className="text-[9px] font-bold text-[#D4AF37] uppercase tracking-widest block">Covenant Yearly</span>
+                    <h3 className="text-base font-bold text-white mt-1">Assembly Yearly</h3>
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Save roughly 16% on lock-in. Premium uninterrupted minister processing tokens.
+                    </p>
+                  </div>
+                  <div className="pt-4 border-t border-white/5 mt-4">
+                    <p className="text-sm font-extrabold text-[#D4AF37] mb-3">
+                      $99.99 / year <span className="text-[9px] text-emerald-400 font-normal ml-1">Save ~16%</span>
+                    </p>
+                    <button
+                      onClick={() => handleSubscribe("yearly")}
+                      className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black py-2 px-4 rounded-lg text-xs font-black transition cursor-pointer shadow-lg"
+                    >
+                      Subscribe Annually
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("sub")}
+                  className="text-[#D4AF37] hover:underline transition font-bold cursor-pointer"
+                >
+                  Configure billing sandbox settings & status controls →
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           
           {/* TAB 1: OVERVIEW DASHBOARD */}
           {activeTab === "dashboard" && (
@@ -758,6 +944,17 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB 4.5: DEVOTIONAL & PRAYERS */}
+          {activeTab === "devotional" && (
+            <div className="animate-fade-in">
+              <DevotionalPrayers 
+                user={user}
+                triggerToast={triggerToast}
+                preferredVersion={preferredVersion}
+              />
+            </div>
+          )}
+
           {/* TAB 5: MANAGEMENT */}
           {activeTab === "management" && (
             <div className="animate-fade-in">
@@ -792,78 +989,239 @@ export default function App() {
           {/* TAB 7: SUBSCRIPTIONS & OFFERS */}
           {activeTab === "sub" && (
             <div className="space-y-6 animate-fade-in font-sans-raleway">
-              <div className="text-center max-w-xl mx-auto space-y-2">
-                <span className="text-[10px] font-bold text-[#D4AF37] tracking-widest uppercase block">FaithFlow License Access</span>
-                <h2 className="text-xl font-serif-cinzel font-bold text-white">Select Your Assembly Level Authorization</h2>
-                <p className="text-xs text-[#B0C4DE]">
-                  We prioritize continuous covenant tooling access. All packages are securely encrypted.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto">
-                {/* Package 1 */}
-                <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Beta Trial</span>
-                    <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">7-Day Free Trial</h3>
-                    <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                      Full functional testing access to outline generators, BibleGPT databases, guest logs, and audio transcripts.
-                    </p>
+              
+              {/* Conditional Sandbox Checkout Simulator View */}
+              {new URLSearchParams(window.location.search).get("simulate_checkout") === "true" ? (
+                <div className="max-w-md mx-auto border border-[#D4AF37]/45 bg-[#0A0713] p-6 rounded-2xl gold-glow relative space-y-6">
+                  <div className="absolute top-2 right-2 bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[8px] font-mono uppercase tracking-widest font-black px-2 py-0.5 rounded">
+                    Stripe Sandbox Simulator
                   </div>
-                  <div className="pt-4">
-                    <p className="text-sm font-bold text-[#D4AF37] mb-3">$0.00 / No obligations</p>
-                    <button 
-                      onClick={() => triggerToast("✓", "Active Beta trial initialized instantly.")}
-                      className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
+
+                  <div className="text-center space-y-1">
+                    <h3 className="text-base font-serif-cinzel font-bold text-white tracking-widest">STRIPE SECURE CHECKOUT</h3>
+                    <p className="text-[10px] text-slate-400">Sandbox environment. No real money will be charged.</p>
+                  </div>
+
+                  {/* Summary receipt info */}
+                  <div className="bg-[#110B24]/40 border border-white/5 p-4 rounded-xl space-y-1.5 text-xs text-slate-300">
+                    <div className="flex justify-between">
+                      <span>Plan Selected:</span>
+                      <span className="font-bold text-[#D4AF37] uppercase">
+                        {new URLSearchParams(window.location.search).get("planType") === "yearly" ? "Assembly Yearly" : "Shepherd Monthly"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Total Due Today:</span>
+                      <span className="font-bold text-white">
+                        {new URLSearchParams(window.location.search).get("planType") === "yearly" ? "$99.99" : "$9.99"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* High fidelity Card Input Form fields */}
+                  <div className="space-y-3.5 text-xs">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-mono uppercase mb-1">Email Address</label>
+                      <input 
+                        type="text" 
+                        disabled
+                        value={user?.email || "akindewum@gmail.com"} 
+                        className="w-full bg-[#050309] text-slate-300 border border-white/10 px-3 py-2 rounded-lg focus:outline-none" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-slate-400 font-mono uppercase mb-1">Card Number</label>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          placeholder="4242 •••• •••• 4242" 
+                          maxLength={19}
+                          className="w-full bg-[#050309] text-white border border-[#D4AF37]/30 px-3 py-2 rounded-lg tracking-widest font-mono focus:outline-none focus:border-[#D4AF37]" 
+                        />
+                        <span className="absolute right-3 top-2 text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-bold font-mono">
+                          VISA
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-mono uppercase mb-1">Expiration</label>
+                        <input 
+                          type="text" 
+                          placeholder="12 / 29" 
+                          maxLength={5}
+                          className="w-full bg-[#050309] text-white border border-white/10 px-3 py-2 rounded-lg font-mono focus:outline-none" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-mono uppercase mb-1">CVC Code</label>
+                        <input 
+                          type="text" 
+                          placeholder="311" 
+                          maxLength={3}
+                          className="w-full bg-[#050309] text-white border border-white/10 px-3 py-2 rounded-lg font-mono focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSimulatePaymentComplete(new URLSearchParams(window.location.search).get("planType") || "monthly")}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-black py-2.5 rounded-lg text-xs font-black tracking-wider uppercase transition duration-150 cursor-pointer shadow-lg font-mono"
                     >
-                      Start Free Trial
+                      ✓ Approve Simulated checkout session
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newUrl = window.location.origin + window.location.pathname + "?tab=sub";
+                        window.history.replaceState({}, document.title, newUrl);
+                        refreshSubscriptionStatus();
+                        triggerToast("ℹ️", "Checkout transaction aborted.");
+                      }}
+                      className="w-full text-center text-slate-400 hover:text-white transition py-1 text-[10px] cursor-pointer block"
+                    >
+                      Cancel and return
                     </button>
                   </div>
                 </div>
-
-                {/* Package 2 */}
-                <div className="border border-[#D4AF37] bg-[#112055] p-5 rounded-2xl space-y-4 flex flex-col justify-between gold-glow relative overflow-hidden">
-                  <div className="absolute top-2 right-2 bg-[#D4AF37] text-[#0A0F1E] text-[8px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded">
-                    Popular
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-[#D4AF37] uppercase block">Shepherd Monthly</span>
-                    <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Standard Monthly</h3>
-                    <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                      Full access to live Veo visual generators, Sound doctrine filters, text-to-speech converters, and premium calendar synchronizers.
+              ) : (
+                <>
+                  {/* Standard Subscription Section */}
+                  <div className="text-center max-w-xl mx-auto space-y-2">
+                    <span className="text-[10px] font-bold text-[#D4AF37] tracking-widest uppercase block">FaithFlow License Access</span>
+                    <h2 className="text-xl font-serif-cinzel font-bold text-white">Select Your Assembly Level Authorization</h2>
+                    <p className="text-xs text-[#B0C4DE]">
+                      We prioritize continuous covenant tooling access. Toggle and simulate your package instantly.
                     </p>
                   </div>
-                  <div className="pt-4">
-                    <p className="text-base font-bold text-[#D4AF37] mb-3">$9.99 / Monthly</p>
-                    <button 
-                      onClick={() => triggerToast("✨", "Navigating to secure integration billing portal...")}
-                      className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-extrabold text-xs py-2 rounded-lg transition"
-                    >
-                      Subscribe Monthly
-                    </button>
-                  </div>
-                </div>
 
-                {/* Package 3 */}
-                <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Covenant Yearly</span>
-                    <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Assembly Yearly</h3>
-                    <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                      Complete, uninterrupted multi-minister access limits. Save 17% and lock in constant premium low-latency processing speeds.
-                    </p>
+                  {/* Active License Details Badge */}
+                  {subscription && (
+                    <div className="max-w-4xl mx-auto border border-[#D4AF37]/30 bg-[#0E1B3E] rounded-2xl p-4.5 space-y-3 shadow-lg">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-[#D4AF37]/15 pb-3 gap-2">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] font-mono font-bold uppercase text-slate-400">Current active credential</span>
+                          <h4 className="text-sm font-bold text-white flex items-center gap-1.5 uppercase font-serif-cinzel">
+                            <Crown className="w-4 h-4 text-[#D4AF37]" /> 
+                            Status: <span className={subscription.status === "expired" ? "text-rose-450" : "text-emerald-400"}>[{subscription.status}]</span>
+                          </h4>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="text-[10px] bg-slate-800 text-slate-200 border border-white/5 py-1 px-3 rounded-full font-mono">
+                            Plan: {subscription.planType.toUpperCase()}
+                          </span>
+                          <span className="text-[10px] bg-amber-950/45 text-amber-400 border border-amber-900/30 py-1 px-3 rounded-full font-mono">
+                            Expires: {new Date(subscription.expiresAt).toLocaleDateString()} ({subscription.daysRemaining} days left)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Developer Controls Sandbox Buttons */}
+                      <div className="bg-[#070D1E]/80 border border-[#D4AF37]/20 p-3 rounded-xl space-y-2.5">
+                        <span className="text-[9px] font-mono font-bold uppercase text-amber-300 block tracking-widest">
+                          ⚡ DEVELOPER CONTROL UNIT (FAITHFLOW RE-ROUTE SANDBOX)
+                        </span>
+                        <p className="text-[10px] text-slate-405 leading-normal">
+                          Because we are in the development sandbox, use these physical controls to immediately switch state back and forth and see how FaithFlow handles the paywalls seamlessly.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => forceSubscriptionStatus("trialing", "trial", 7)}
+                            className="bg-[#112055] hover:bg-[#112055]/85 text-[#D4AF37] border border-[#D4AF37]/35 py-1.5 px-2.5 rounded-lg text-xs font-mono font-bold transition cursor-pointer"
+                          >
+                            Set Trial Mode (7 Days left)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => forceSubscriptionStatus("expired", "trial", -1)}
+                            className="bg-red-950/40 hover:bg-red-900/40 text-red-100 border border-red-500/40 py-1.5 px-2.5 rounded-lg text-xs font-mono font-bold transition cursor-pointer"
+                          >
+                            Set Trial Expired (Lockout)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => forceSubscriptionStatus("active", "monthly", 30)}
+                            className="bg-emerald-950/40 hover:bg-emerald-900/45 text-emerald-100 border border-emerald-500/45 py-1.5 px-2.5 rounded-lg text-xs font-mono font-bold transition cursor-pointer"
+                          >
+                            Set Premium Active (Unlocked)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto">
+                    {/* Package 1 */}
+                    <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Beta Trial</span>
+                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">7-Day Free Trial</h3>
+                        <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
+                          Full functional testing access to outline generators, BibleGPT databases, guest logs, and audio transcripts.
+                        </p>
+                      </div>
+                      <div className="pt-4">
+                        <p className="text-sm font-bold text-[#D4AF37] mb-3">$0.00 / No obligations</p>
+                        <button 
+                          onClick={() => forceSubscriptionStatus("trialing", "trial", 7)}
+                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
+                        >
+                          Reset / Start Trial
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Package 2 */}
+                    <div className="border border-[#D4AF37] bg-[#112055] p-5 rounded-2xl space-y-4 flex flex-col justify-between gold-glow relative overflow-hidden">
+                      <div className="absolute top-2 right-2 bg-[#D4AF37] text-[#0A0F1E] text-[8px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded">
+                        Popular
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-[#D4AF37] uppercase block">Shepherd Monthly</span>
+                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Standard Monthly</h3>
+                        <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
+                          Full access to live Veo visual generators, Sound doctrine filters, text-to-speech converters, and premium calendar synchronizers.
+                        </p>
+                      </div>
+                      <div className="pt-4">
+                        <p className="text-base font-bold text-[#D4AF37] mb-3">$9.99 / Monthly</p>
+                        <button 
+                          onClick={() => handleSubscribe("monthly")}
+                          className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-extrabold text-xs py-2 rounded-lg transition"
+                        >
+                          Subscribe Monthly
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Package 3 */}
+                    <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Covenant Yearly</span>
+                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Assembly Yearly</h3>
+                        <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
+                          Complete, uninterrupted multi-minister access limits. Save 17% and lock in constant premium low-latency processing speeds.
+                        </p>
+                      </div>
+                      <div className="pt-4">
+                        <p className="text-sm font-bold text-[#D4AF37] mb-3">$99.99 / Year (Best Value)</p>
+                        <button 
+                          onClick={() => handleSubscribe("yearly")}
+                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
+                        >
+                          Subscribe Yearly
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="pt-4">
-                    <p className="text-sm font-bold text-[#D4AF37] mb-3">$99.99 / Year (Best Value)</p>
-                    <button 
-                      onClick={() => triggerToast("✨", "Initializing continuous annual covenant token...")}
-                      className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
-                    >
-                      Subscribe Yearly
-                    </button>
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1171,20 +1529,39 @@ export default function App() {
                 </div>
 
                 {/* Maintenance zone */}
-                <div className="bg-rose-950/20 border border-rose-500/20 p-4 rounded-xl space-y-2">
-                  <span className="text-[10px] font-bold text-rose-400 uppercase tracking-widest block">Sovereign Maintenance Zone</span>
-                  <p className="text-[11px] leading-relaxed text-slate-300">
-                    Wipe local state caches, revoke session cookies, and cold-restart application registries. Please back up your profiles prior to action.
-                  </p>
-                  <button 
-                    onClick={handleUninstallAndWipe}
-                    className="w-full bg-rose-900/60 hover:bg-rose-850 border border-rose-500/40 text-rose-100 font-semibold py-2 rounded-lg transition cursor-pointer"
-                  >
-                    🗑️ Wipe App Cookies & Cache
-                  </button>
+                <div className="space-y-4">
+                  <div className="bg-[#050D1E] border border-[#D4AF37]/20 p-4 rounded-xl space-y-2">
+                    <span className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-widest block flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-[#D4AF37]" /> Secure Stripe Payment Gateway
+                    </span>
+                    <p className="text-[11px] leading-relaxed text-slate-300">
+                      Your real-time Stripe client credential is ready.
+                    </p>
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-mono font-bold text-slate-400 block uppercase">Stripe Publishable Key:</span>
+                      <code className="text-[10.5px] block font-mono bg-[#030611] p-2 rounded border border-[#D4AF37]/15 text-emerald-450 break-all select-all">
+                        {(import.meta as any).env?.VITE_STRIPE_PUBLISHABLE_KEY || "pk_live_Y8I4kIWBXPdQIfZ2tthPIFwV00DlqCjZva"}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div className="bg-rose-950/20 border border-rose-500/20 p-4 rounded-xl space-y-2">
+                    <span className="text-[10px] font-bold text-rose-400 uppercase tracking-widest block">Sovereign Maintenance Zone</span>
+                    <p className="text-[11px] leading-relaxed text-slate-300">
+                      Wipe local state caches, revoke session cookies, and cold-restart application registries. Please back up your profiles prior to action.
+                    </p>
+                    <button 
+                      onClick={handleUninstallAndWipe}
+                      className="w-full bg-rose-900/60 hover:bg-rose-850 border border-rose-500/40 text-rose-100 font-semibold py-2 rounded-lg transition cursor-pointer text-xs"
+                    >
+                      🗑️ Wipe App Cookies & Cache
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
+          )}
+            </>
           )}
 
         </main>

@@ -1,0 +1,9 @@
+{
+  "test_user": {
+    "userId": "test_user",
+    "subscriptionId": "sub_test123",
+    "status": "trialing",
+    "expiresAt": "2026-05-28T22:46:57.000Z",
+    "planType": "trial"
+  }
+}

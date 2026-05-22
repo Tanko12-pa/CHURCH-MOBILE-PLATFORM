@@ -90,6 +90,52 @@
         "status": { "type": "string", "enum": ["Sent", "Scheduled", "Draft"] }
       },
       "required": ["id", "to", "subject", "body", "sentAt", "status"]
+    },
+    "DevotionalSession": {
+      "title": "DevotionalSession",
+      "description": "Saved devotional studies and active reflection logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "topic": { "type": "string" },
+        "styleLabel": { "type": "string" },
+        "scriptureReading": { "type": "string" },
+        "dailyMeditation": { "type": "string" },
+        "propheticDeclaration": { "type": "string" },
+        "prayerPoints": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "topic", "styleLabel", "scriptureReading", "dailyMeditation", "createdAt"]
+    },
+    "PrayerJournalEntry": {
+      "title": "PrayerJournalEntry",
+      "description": "Pastor or member custom prayer journal entries tracking answered status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "request": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Answered"] },
+        "createdAt": { "type": "string" },
+        "answeredAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "request", "status", "createdAt"]
+    },
+    "ReminderSetting": {
+      "title": "ReminderSetting",
+      "description": "Individual daily prayer reminder notification preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "hour": { "type": "integer" },
+        "minute": { "type": "integer" },
+        "enabled": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "hour", "minute", "enabled"]
     }
   },
   "firestore": {
@@ -116,6 +162,18 @@
     "emails": {
       "schema": "SentEmail",
       "description": "Collection of sent evangelical mail communications"
+    },
+    "devotions": {
+      "schema": "DevotionalSession",
+      "description": "Saved personal or general devotional and meditation session records"
+    },
+    "journal": {
+      "schema": "PrayerJournalEntry",
+      "description": "Historical prayer diaries and answered petitions"
+    },
+    "reminders": {
+      "schema": "ReminderSetting",
+      "description": "Daily reminders config for users"
     }
   }
 }

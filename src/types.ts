@@ -96,3 +96,34 @@ export interface BibleDoctrine {
   summary: string;
   uploadedAt?: string;
 }
+
+export interface DevotionalSession {
+  id: string;
+  userId: string;
+  topic: string;
+  styleLabel: string;
+  scriptureReading: string;
+  dailyMeditation: string;
+  propheticDeclaration: string;
+  prayerPoints: string[];
+  createdAt: string;
+}
+
+export interface PrayerJournalEntry {
+  id: string;
+  userId: string;
+  title: string;
+  request: string;
+  status: "Active" | "Answered";
+  createdAt: string;
+  answeredAt?: string;
+}
+
+export interface ReminderSetting {
+  id: string;
+  userId: string;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+  updatedAt: string;
+}
