@@ -136,6 +136,34 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "userId", "hour", "minute", "enabled"]
+    },
+    "FavoriteScripture": {
+      "title": "FavoriteScripture",
+      "description": "User's favorite scriptures highlighted from devotional studies",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "reference": { "type": "string", "description": "The Bible verse scripture reference" },
+        "savedAt": { "type": "string", "description": "ISO date string when reference was saved" }
+      },
+      "required": ["id", "userId", "reference", "savedAt"]
+    },
+    "ChurchProfile": {
+      "title": "ChurchProfile",
+      "description": "Profile details for different branches and local parishes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique profile identifier" },
+        "name": { "type": "string", "description": "Full name of the parish or branch" },
+        "address": { "type": "string", "description": "Physical location address" },
+        "email": { "type": "string", "format": "email", "description": "Electronic contact mail" },
+        "phone": { "type": "string", "description": "Primary voice or messaging phone number" },
+        "province": { "type": "string", "description": "Provincial or state division" },
+        "country": { "type": "string", "description": "Country of operation" },
+        "bibleVersion": { "type": "string", "description": "Preferred default study Bible version" }
+      },
+      "required": ["id", "name", "address", "email", "phone", "province", "country", "bibleVersion"]
     }
   },
   "firestore": {
@@ -174,6 +202,14 @@
     "reminders": {
       "schema": "ReminderSetting",
       "description": "Daily reminders config for users"
+    },
+    "favorites": {
+      "schema": "FavoriteScripture",
+      "description": "User's personal scripture highlights and favorite references"
+    },
+    "profiles": {
+      "schema": "ChurchProfile",
+      "description": "Parish and central church brand profiles"
     }
   }
 }

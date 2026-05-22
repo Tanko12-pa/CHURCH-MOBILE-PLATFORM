@@ -127,3 +127,10 @@ export interface ReminderSetting {
   enabled: boolean;
   updatedAt: string;
 }
+
+export interface FavoriteScripture {
+  id: string;
+  userId: string;
+  reference: string;
+  savedAt: string;
+}

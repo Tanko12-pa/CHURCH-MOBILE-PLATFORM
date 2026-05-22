@@ -9,7 +9,9 @@ import {
   collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs 
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
-import { DevotionalSession, PrayerJournalEntry, ReminderSetting } from "../types";
+import { DevotionalSession, PrayerJournalEntry, ReminderSetting, FavoriteScripture } from "../types";
+
+const SCRIPTURE_REGEX = /\b((?:(?:1|2|3)\s+)?(?:Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|Samuel|Kings|Chronicles|Ezra|Nehemiah|Esther|Job|Psalms|Proverbs|Ecclesiastes|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|Corinthians|Galatians|Ephesians|Philippians|Colossians|Thessalonians|Timothy|Titus|Philemon|Hebrews|James|Peter|Jude|Revelation|Gen|Ex|Lev|Num|Deut|Josh|Judg|Sam|Chr|Neh|Esth|Ps|Prov|Eccl|Song|Isa|Jer|Lam|Ezek|Dan|Hos|Obad|Mic|Nah|Hab|Zeph|Hag|Zech|Mal|Mt|Mk|Lk|Jn|Rom|Cor|Gal|Eph|Phil|Col|Thess|Tim|Tit|Phlm|Heb|Jas|Pet|Rev)\s+\d+:\d+(?:-\d+)?)\b/gi;
 
 interface DevotionalPrayersProps {
   user?: any;
@@ -93,6 +95,12 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
 
   // Saved Devotions History states
   const [savedDevotions, setSavedDevotions] = useState<DevotionalSession[]>([]);
+
+  // Visual reading scroll tracking state
+  const [scrollPercent, setScrollPercent] = useState(0);
+
+  // Favorite scripture highlights state
+  const [favoriteScriptures, setFavoriteScriptures] = useState<{ id: string; reference: string; savedAt?: string }[]>([]);
 
   const activeTrack = BROADCAST_TRACKS[activeTrackIdx];
 
@@ -247,6 +255,37 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
     return () => unsubscribe();
   }, [user]);
 
+  // 6b. Real-time Firebase Sync of Favorite Scriptures
+  useEffect(() => {
+    if (!user) {
+      const offline = localStorage.getItem("faithflow_favorite_scriptures_guest") || "[]";
+      try {
+        setFavoriteScriptures(JSON.parse(offline));
+      } catch (e) {
+        console.error("Failed parsing guest bible favorites", e);
+      }
+      return;
+    }
+
+    const q = query(
+      collection(db, "favorites"),
+      where("userId", "==", user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: { id: string; reference: string; savedAt?: string }[] = [];
+      snapshot.forEach((doc) => {
+        const val = doc.data() as FavoriteScripture;
+        items.push({ id: doc.id, reference: val.reference, savedAt: val.savedAt });
+      });
+      setFavoriteScriptures(items);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, "favorites");
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
   // 7. Load Reminder Configuration from Firebase / Storage
   useEffect(() => {
     if (!user) {
@@ -387,6 +426,137 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
     setSpeechUtterance(utterance);
     SpeechS.speak(utterance);
     triggerToast("🔊", "Narration playing at customized speed.");
+  };
+
+  // TXT Exporter for Prayer Points and Meditation Summary
+  const handleExportTxt = () => {
+    if (!devotional) return;
+
+    const topicClean = topic.replace(/[^a-zA-Z0-9_\s-]/g, "").trim().replace(/\s+/g, "_");
+    const fileName = `faithflow_devotional_${topicClean || "study"}.txt`;
+
+    const content = `========================================================================
+FAITHFLOW MINISTRY SUITE - DEVOTIONAL STUDY ARCHIVE
+========================================================================
+TOPIC: \t${topic}
+STYLE: \t${devotional.styleLabel}
+EXPORTED AT: \t${new Date().toLocaleString()}
+
+------------------------------------------------------------------------
+📖 SCRIPTURE READING
+------------------------------------------------------------------------
+${devotional.scriptureReading.replace(/\*\*/g, "").replace(/###\s*📖\s*Today's\s*Scripture\s*Reading/i, "").trim()}
+
+------------------------------------------------------------------------
+💡 DAILY MEDITATION STUDY
+------------------------------------------------------------------------
+${devotional.dailyMeditation.replace(/###\s*💡\s*Daily\s*Meditation/i, "").trim()}
+
+------------------------------------------------------------------------
+🗣️ PROPHETIC DECLARATION & APPLICATION
+------------------------------------------------------------------------
+${devotional.propheticDeclaration.replace(/###\s*🗣️\s*Prophetic\s*Declaration\s*\/|###\s*🗣️\s*Life\s*Application/i, "").trim()}
+
+------------------------------------------------------------------------
+🙏 STRUCTURED INTERCESSORY PRAYER CHECKLIST
+------------------------------------------------------------------------
+${devotional.prayerPoints
+  .map((p, idx) => {
+    const cleanP = p.replace(/^\d+\.\s*/, "").replace(/###\s*🙏\s*Structured\s*Prayer\s*Points/i, "").trim();
+    const isDone = completedPrayers[idx] ? " [COMPLETED]" : " [PENDING]";
+    return `${idx + 1}. ${cleanP}${isDone}`;
+  })
+  .join("\n\n")}
+
+========================================================================
+FaithFlow Ministry Suite (c) 2026. Nourish your spiritual soul.
+========================================================================`;
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    triggerToast("💾", "Structured TXT devotional guide archived!");
+  };
+
+  // Toggle scripture reference highlight and store/remove in "favorites"
+  const handleScriptureClick = async (refText: string) => {
+    const cleanRef = refText.trim();
+    if (!cleanRef) return;
+
+    const existing = favoriteScriptures.find(f => f.reference.toLowerCase() === cleanRef.toLowerCase());
+
+    if (existing) {
+      if (!user) {
+        const updated = favoriteScriptures.filter(f => f.id !== existing.id);
+        setFavoriteScriptures(updated);
+        localStorage.setItem("faithflow_favorite_scriptures_guest", JSON.stringify(updated));
+        triggerToast("🗑️", `Removed "${cleanRef}" from Guest Favorites.`);
+      } else {
+        try {
+          await deleteDoc(doc(db, "favorites", existing.id));
+          triggerToast("🗑️", `Removed "${cleanRef}" from Favorites.`);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.DELETE, `favorites/${existing.id}`);
+        }
+      }
+    } else {
+      const docId = `fav_${user ? user.uid : "guest"}_${cleanRef.replace(/[^a-zA-Z0-9]/g, "_")}`;
+      const payload = {
+        id: docId,
+        userId: user ? user.uid : "guest",
+        reference: cleanRef,
+        savedAt: new Date().toISOString()
+      };
+
+      if (!user) {
+        const updated = [...favoriteScriptures, { id: docId, reference: cleanRef }];
+        setFavoriteScriptures(updated);
+        localStorage.setItem("faithflow_favorite_scriptures_guest", JSON.stringify(updated));
+        triggerToast("❤️", `Saved "${cleanRef}" to Guest Favorites!`);
+      } else {
+        try {
+          await setDoc(doc(db, "favorites", docId), payload);
+          triggerToast("❤️", `Saved "${cleanRef}" to Favorites!`);
+        } catch (e) {
+          handleFirestoreError(e, OperationType.WRITE, `favorites/${docId}`);
+        }
+      }
+    }
+  };
+
+  // Render text and wrap matched scripture quotes into clickable favorites anchors
+  const renderTextWithScriptureHighlights = (text: string) => {
+    if (!text) return null;
+
+    const parts = text.split(SCRIPTURE_REGEX);
+    return parts.map((part, idx) => {
+      if (idx % 2 === 1) {
+        const isFavorited = favoriteScriptures.some(f => f.reference.toLowerCase() === part.trim().toLowerCase());
+        return (
+          <span
+            key={idx}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleScriptureClick(part);
+            }}
+            className={`font-semibold cursor-pointer underline decoration-dotted transition-all duration-150 inline-block px-1 rounded hover:opacity-85 ${
+              isFavorited
+                ? "bg-[#D4AF37] text-slate-950 font-extrabold shadow-md transform hover:scale-105"
+                : "text-[#D4AF37] hover:bg-[#D4AF37]/20"
+            }`}
+            title="Highlight & save to Favorites collection"
+          >
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
   };
 
   // Saved Devotional History Handlers
@@ -952,38 +1122,92 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
             </div>
 
             {/* RIGHT DEVOTIONAL DISPLAY PANEL (8 columns) */}
-            <div className="col-span-1 lg:col-span-8 space-y-6 animate-fade-in text-white">
+            <div className="col-span-1 lg:col-span-8 space-y-6 animate-fade-in text-white animate-slide-down">
               {devotional ? (
                 <div className="space-y-6">
                   
                   {/* Master Presentation Guide */}
-                  <div className="bg-gradient-to-b from-[#060D1F] to-[#0A112A] border border-[#D4AF37]/25 p-6 rounded-2xl shadow-xl space-y-6">
+                  <div 
+                    onScroll={(e) => {
+                      const target = e.currentTarget;
+                      const pct = Math.round((target.scrollTop / (target.scrollHeight - target.clientHeight)) * 100) || 0;
+                      setScrollPercent(pct);
+                    }}
+                    className="bg-gradient-to-b from-[#060D1F] to-[#0A112A] border border-[#D4AF37]/25 p-6 rounded-2xl shadow-xl space-y-6 max-h-[700px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent"
+                  >
                     
                     {/* Header Controls for Copy / Read Aloud / Save to History */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#D4AF37]/15 pb-4 gap-3">
-                      <span className="text-[10px] font-bold font-mono text-[#D4AF37] uppercase tracking-widest block bg-[#D4AF37]/10 px-2 py-0.5 rounded border border-[#D4AF37]/20 self-start">
-                        Layout: {devotional.styleLabel}
-                      </span>
+                      <div className="flex items-center gap-3 self-start">
+                        <span className="text-[10px] font-bold font-mono text-[#D4AF37] uppercase tracking-widest block bg-[#D4AF37]/10 px-2 py-0.5 rounded border border-[#D4AF37]/20">
+                          Layout: {devotional.styleLabel}
+                        </span>
+
+                        {/* Visual Reading Progress Circle Arc with orbiting dot */}
+                        <div className="flex items-center gap-1.5 bg-[#030611]/80 px-2 py-1 rounded border border-slate-800" title={`${scrollPercent}% of meditation study read`}>
+                          <div className="relative w-5 h-5 flex items-center justify-center">
+                            <svg className="w-5 h-5 transform -rotate-90">
+                              <circle
+                                cx="10"
+                                cy="10"
+                                r="8"
+                                className="stroke-slate-800"
+                                strokeWidth="2"
+                                fill="transparent"
+                              />
+                              <circle
+                                cx="10"
+                                cy="10"
+                                r="8"
+                                className="stroke-[#D4AF37] transition-all duration-75"
+                                strokeWidth="2"
+                                fill="transparent"
+                                strokeDasharray={50.26}
+                                strokeDashoffset={50.26 - (scrollPercent / 100) * 50.26}
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                            {/* orbiting white dot indicators on the border */}
+                            <div 
+                              className="absolute w-1 h-1 bg-white rounded-full shadow-sm"
+                              style={{
+                                transform: `rotate(${(scrollPercent / 100) * 360}deg) translateY(-8px)`
+                              }}
+                            />
+                            <span className="absolute text-[6.5px] font-bold font-mono text-white">{scrollPercent}%</span>
+                          </div>
+                          <span className="text-[8px] uppercase tracking-wider text-slate-400 font-mono font-black">Scroll Progress</span>
+                        </div>
+                      </div>
                       
-                      <div className="flex items-center gap-2 self-end">
+                      <div className="flex items-center gap-2 self-end flex-wrap">
+                        {/* Export Session TXT for client archives */}
+                        <button
+                          onClick={handleExportTxt}
+                          className="flex items-center gap-1 text-[10.5px] bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[#D4AF37] py-1.5 px-2.5 rounded-lg cursor-pointer transition font-bold"
+                          title="Export Prayer Points and Meditation Session as structured text archive"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Export TXT
+                        </button>
+
                         {/* 4. Save references to history */}
                         <button
                           onClick={handleSaveDevotion}
-                          className="flex items-center gap-1 text-[10.5px] bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-500/30 text-emerald-300 py-1.5 px-3 rounded-lg cursor-pointer transition font-bold"
+                          className="flex items-center gap-1 text-[10.5px] bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-500/30 text-emerald-300 py-1.5 px-2.5 rounded-lg cursor-pointer transition font-bold"
                           title="Archive Session to Firestore History"
                         >
                           <History className="w-3.5 h-3.5" /> Save to History
                         </button>
                         <button
                           onClick={handleCopy}
-                          className="flex items-center gap-1 text-[10.5px] bg-[#112055]/45 hover:bg-[#112055]/70 border border-slate-700 py-1.5 px-3 rounded-lg text-[#B0C4DE] cursor-pointer transition font-medium"
+                          className="flex items-center gap-1 text-[10.5px] bg-[#112055]/45 hover:bg-[#112055]/70 border border-slate-700 py-1.5 px-2.5 rounded-lg text-[#B0C4DE] cursor-pointer transition font-medium"
                           title="Copy text content"
                         >
                           <Copy className="w-3.5 h-3.5" /> Copy
                         </button>
                         <button
                           onClick={handleSpeak}
-                          className={`flex items-center gap-1 text-[10.5px] border py-1.5 px-3 rounded-lg cursor-pointer transition font-medium ${
+                          className={`flex items-center gap-1 text-[10.5px] border py-1.5 px-2.5 rounded-lg cursor-pointer transition font-medium ${
                             isPlayingText
                               ? "bg-rose-950/40 border-rose-500/30 text-rose-300"
                               : "bg-[#112055]/45 hover:bg-[#112055]/70 border-slate-700 text-[#B0C4DE]"
@@ -1052,12 +1276,12 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
 
                     {/* 1. Scripture Reading Section */}
                     <div className="bg-[#112055]/15 border border-[#112055]/30 p-4 rounded-xl space-y-2">
-                      <h4 className="text-xs font-black text-white flex items-center gap-2 uppercase tracking-wide">
+                       <h4 className="text-xs font-black text-white flex items-center gap-2 uppercase tracking-wide">
                         <BookOpen className="w-4 h-4 text-[#D4AF37]" />
                         📖 Today's Scripture Reading
                       </h4>
-                      <div className="text-xs text-slate-100 italic leading-relaxed border-l-2 border-[#D4AF37] pl-3 py-1 font-sans">
-                        {devotional.scriptureReading.replace(/###\s*📖\s*Today's\s*Scripture\s*Reading/i, "").trim()}
+                      <div className="text-xs text-slate-100 italic leading-relaxed border-l-2 border-[#D4AF37] pl-3 py-1 font-sans font-medium">
+                        {renderTextWithScriptureHighlights(devotional.scriptureReading.replace(/###\s*📖\s*Today's\s*Scripture\s*Reading/i, "").trim())}
                       </div>
                     </div>
 
@@ -1068,7 +1292,7 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
                         🎯 Daily Meditation Study
                       </h4>
                       <div className="text-xs text-slate-200 leading-relaxed font-normal whitespace-pre-wrap font-sans">
-                        {devotional.dailyMeditation.replace(/###\s*💡\s*Daily\s*Meditation/i, "").trim()}
+                        {renderTextWithScriptureHighlights(devotional.dailyMeditation.replace(/###\s*💡\s*Daily\s*Meditation/i, "").trim())}
                       </div>
                     </div>
 
@@ -1079,7 +1303,7 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
                         🗣️ Prophetic Declaration
                       </h4>
                       <p className="text-xs font-medium leading-relaxed text-slate-100 italic">
-                        "{devotional.propheticDeclaration.replace(/###\s*🗣️\s*Prophetic\s*Declaration\s*\/|###\s*🗣️\s*Life\s*Application/i, "").trim()}"
+                        "{renderTextWithScriptureHighlights(devotional.propheticDeclaration.replace(/###\s*🗣️\s*Prophetic\s*Declaration\s*\/|###\s*🗣️\s*Life\s*Application/i, "").trim())}"
                       </p>
                     </div>
 
@@ -1132,45 +1356,95 @@ export default function DevotionalPrayers({ user, triggerToast }: DevotionalPray
 
                   </div>
 
-                  {/* SAVED STUDIES ACCORDION VIEW HISTORIES (Scrollable panel under active view) */}
-                  {savedDevotions.length > 0 && (
+                  {/* DUAL HISTORY AND HIGHLIGHT PANELS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Saved history */}
+                    {savedDevotions.length > 0 ? (
+                      <div className="bg-[#050D1E]/90 border border-slate-800 p-5 rounded-xl space-y-3.5 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2">
+                            <History className="w-4 h-4 text-[#D4AF37]" />
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                              My Saved Study Guides ({savedDevotions.length})
+                            </h4>
+                          </div>
+                          <div className="space-y-2 max-h-60 overflow-y-auto pr-1 mt-3 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                            {savedDevotions.map((session) => (
+                              <div
+                                key={session.id}
+                                onClick={() => handleLoadSavedDevotion(session)}
+                                className="bg-[#030611] hover:bg-[#112055]/30 border border-slate-800 hover:border-[#D4AF37]/30 p-2.5 rounded-lg flex items-start justify-between gap-2 transition cursor-pointer group"
+                              >
+                                <div className="space-y-0.5 truncate flex-1 select-none text-left">
+                                  <span className="text-[9px] text-slate-400 font-mono block">
+                                    {new Date(session.createdAt).toLocaleDateString()} &bull; {session.styleLabel.split("(")[0]}
+                                  </span>
+                                  <h5 className="text-xs font-bold text-white group-hover:text-[#D4AF37] transition truncate">
+                                    {session.topic}
+                                  </h5>
+                                  <p className="text-[10px] text-slate-400 truncate font-sans">
+                                    {session.dailyMeditation.slice(0, 60)}...
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={(e) => handleDeleteSavedDevotion(e, session.id)}
+                                  className="text-slate-500 hover:text-rose-400 p-1 rounded transition self-center cursor-pointer shrink-0"
+                                  title="Delete Archive Record"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-[#050D1E]/40 border border-dashed border-slate-800 p-5 rounded-xl flex flex-col items-center justify-center text-center py-10 min-h-[200px]">
+                        <History className="w-6 h-6 text-slate-600 mb-1.5" />
+                        <p className="text-[11px] text-slate-400 leading-normal">No archived study guides yet.</p>
+                        <p className="text-[9px] text-slate-500 mt-0.5">Click "Save to History" above to persist guides.</p>
+                      </div>
+                    )}
+
+                    {/* Highlighted scripture favorites */}
                     <div className="bg-[#050D1E]/90 border border-slate-800 p-5 rounded-xl space-y-3.5">
                       <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2">
-                        <History className="w-4 h-4 text-[#D4AF37]" />
+                        <Star className="w-4 h-4 text-[#D4AF37] fill-[#D4AF37]" />
                         <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                          My Saved Study Guides History ({savedDevotions.length})
+                          My Scripture Favorites ({favoriteScriptures.length})
                         </h4>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-1">
-                        {savedDevotions.map((session) => (
-                          <div
-                            key={session.id}
-                            onClick={() => handleLoadSavedDevotion(session)}
-                            className="bg-[#030611] hover:bg-[#112055]/30 border border-slate-800 hover:border-[#D4AF37]/30 p-3 rounded-lg flex items-start justify-between gap-2.5 transition cursor-pointer group"
-                          >
-                            <div className="space-y-1 truncate-1-line flex-1">
-                              <span className="text-[10px] text-slate-400 font-mono block">
-                                {new Date(session.createdAt).toLocaleDateString()} &bull; {session.styleLabel.split("(")[0]}
-                              </span>
-                              <h5 className="text-xs font-bold text-white group-hover:text-[#D4AF37] transition truncate">
-                                {session.topic}
-                              </h5>
-                              <p className="text-[10px] text-slate-400 truncate font-sans">
-                                {session.dailyMeditation.slice(0, 80)}...
-                              </p>
-                            </div>
-                            <button
-                              onClick={(e) => handleDeleteSavedDevotion(e, session.id)}
-                              className="text-slate-500 hover:text-rose-400 p-1 rounded transition self-center cursor-pointer shrink-0"
-                              title="Delete Archive Record"
+                      
+                      {favoriteScriptures.length === 0 ? (
+                        <div className="py-10 flex flex-col items-center justify-center text-center border border-dashed border-slate-800/80 rounded-lg p-4 min-h-[200px]">
+                          <BookOpen className="w-6 h-6 text-slate-600 mb-1.5" />
+                          <p className="text-[11px] text-slate-400">No scriptures favorited yet.</p>
+                          <p className="text-[9px] text-slate-500 mt-1 max-w-[200px]">Click any scripture reference in the devotional study guide (like "Mark 4:39") to highlight and save it!</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto pr-1 mt-3 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                          {favoriteScriptures.map((fav) => (
+                            <div
+                              key={fav.id}
+                              className="bg-[#030611] hover:bg-[#D4AF37]/5 border border-slate-800 hover:border-[#D4AF37]/45 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-2.5 transition text-xs font-medium"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                              <span className="text-[#D4AF37] font-semibold tracking-tight">{fav.reference}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleScriptureClick(fav.reference);
+                                }}
+                                className="text-slate-500 hover:text-rose-400 p-0.5 transition cursor-pointer"
+                                title="Remove Scripture Favorite"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
 
                   {/* Raw markdown details check */}
                   <details className="group bg-[#040914] border border-slate-800 p-4 rounded-xl cursor-pointer">

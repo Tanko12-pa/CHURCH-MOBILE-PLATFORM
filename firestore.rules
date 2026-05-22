@@ -144,6 +144,28 @@ service cloud.firestore {
         && (!data.keys().contains('updatedAt') || data.updatedAt is string);
     }
 
+    // Favorite Scripture validation
+    function isValidFavoriteScripture(data) {
+      return data.keys().hasAll(['id', 'userId', 'reference', 'savedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.reference is string && data.reference.size() <= 256
+        && data.savedAt is string;
+    }
+
+    // Church Profile validation
+    function isValidChurchProfile(data) {
+      return data.keys().hasAll(['id', 'name', 'address', 'email', 'phone', 'province', 'country', 'bibleVersion'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 256
+        && data.address is string && data.address.size() <= 1024
+        && data.email is string && data.email.size() <= 256
+        && data.phone is string && data.phone.size() <= 64
+        && data.province is string && data.province.size() <= 256
+        && data.country is string && data.country.size() <= 256
+        && data.bibleVersion is string && data.bibleVersion.size() <= 32;
+    }
+
 
     // 4. COLLECTION ROUTING & HARDENING
 
@@ -216,6 +238,22 @@ service cloud.firestore {
       allow create: if isEmailVerified() && isValidId(reminderId) && isValidReminderSetting(incoming());
       allow update: if isEmailVerified() && isValidId(reminderId) && isValidReminderSetting(incoming()) && incoming().userId == existing().userId;
       allow delete: if isEmailVerified() && isValidId(reminderId) && existing().userId == request.auth.uid;
+    }
+
+    // Favorites collection
+    match /favorites/{favoriteId} {
+      allow get: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow list: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow create: if isEmailVerified() && isValidId(favoriteId) && isValidFavoriteScripture(incoming());
+      allow update: if isEmailVerified() && isValidId(favoriteId) && isValidFavoriteScripture(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isEmailVerified() && isValidId(favoriteId) && existing().userId == request.auth.uid;
+    }
+
+    // Church Profiles collection
+    match /profiles/{profileId} {
+      allow get, list: if isEmailVerified();
+      allow create, update: if isEmailVerified() && isValidId(profileId) && isValidChurchProfile(incoming());
+      allow delete: if isBootstrappedAdmin() && isValidId(profileId);
     }
   }
 }

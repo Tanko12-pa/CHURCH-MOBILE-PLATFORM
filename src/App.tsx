@@ -15,7 +15,7 @@ import {
   auth, db, handleFirestoreError, OperationType 
 } from "./firebase";
 
-import { Member, NewComer, AttendanceRecord, SpecialEvent, SentEmail, VideoLink } from "./types";
+import { Member, NewComer, AttendanceRecord, SpecialEvent, SentEmail, VideoLink, ChurchProfile } from "./types";
 import SermonPrepStudio from "./components/SermonPrepStudio";
 import BibleTools from "./components/BibleTools";
 import ChurchManagement from "./components/ChurchManagement";
@@ -236,6 +236,29 @@ export default function App() {
     { id: "mail_1", to: "All Members", subject: "Sovereign Grace Church - Pentecost Announcement Outlines", body: "Warm greeting beloved saints. This is to notify you of the upcoming miracle crusade in June...", sentAt: "May 18, 2026 10:15 AM", status: "Sent" }
   ]);
 
+  const [churchProfiles, rawSetChurchProfiles] = useState<ChurchProfile[]>([
+    {
+      id: "prof_1",
+      name: "FaithFlow General Headquarters",
+      address: "12 Revelations Boulevard, Sanctuary Gate",
+      email: "hq@faithflow.org",
+      phone: "+234 815 555 1212",
+      province: "Lagos Province 1",
+      country: "Nigeria",
+      bibleVersion: "ESV"
+    },
+    {
+      id: "prof_2",
+      name: "Trinity Sanctified Assembly (Parish Branch)",
+      address: "88 Sovereign Grace Close, Trinity Hill",
+      email: "trinity@faithflow.org",
+      phone: "+233 244 999 0000",
+      province: "Greater Accra Region",
+      country: "Ghana",
+      bibleVersion: "NKJV"
+    }
+  ]);
+
   // Sync mutations to Cloud Firestore helper
   const syncToFirestore = async (collectionName: string, prevList: any[], nextList: any[]) => {
     if (!auth.currentUser) return;
@@ -308,6 +331,14 @@ export default function App() {
     });
   }) as React.Dispatch<React.SetStateAction<SentEmail[]>>;
 
+  const setChurchProfiles = ((action: React.SetStateAction<ChurchProfile[]>) => {
+    rawSetChurchProfiles(prev => {
+      const next = typeof action === "function" ? (action as any)(prev) : action;
+      syncToFirestore("profiles", prev, next);
+      return next;
+    });
+  }) as React.Dispatch<React.SetStateAction<ChurchProfile[]>>;
+
   // Auth & Sync Subscription Hook
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -343,6 +374,7 @@ export default function App() {
       { name: "events", setter: rawSetSpecialEvents, initialData: specialEvents },
       { name: "videos", setter: rawSetVideoLinks, initialData: videoLinks },
       { name: "emails", setter: rawSetSentEmails, initialData: sentEmails },
+      { name: "profiles", setter: rawSetChurchProfiles, initialData: churchProfiles },
     ];
 
     const unsubscribes = collectionsToSync.map(({ name, setter, initialData }) => {
@@ -967,6 +999,8 @@ export default function App() {
                 setAttendanceLogs={setAttendanceLogs}
                 specialEvents={specialEvents}
                 setSpecialEvents={setSpecialEvents}
+                churchProfiles={churchProfiles}
+                setChurchProfiles={setChurchProfiles}
                 triggerToast={triggerToast}
               />
             </div>

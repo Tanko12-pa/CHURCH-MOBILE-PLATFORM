@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, Download } from "lucide-react";
+import { Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, Download, Sliders, Save } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Member, NewComer, AttendanceRecord, SpecialEvent } from "../types";
+import { Member, NewComer, AttendanceRecord, SpecialEvent, ChurchProfile } from "../types";
 
 interface ChurchManagementProps {
   members: Member[];
@@ -12,6 +12,8 @@ interface ChurchManagementProps {
   setAttendanceLogs: React.Dispatch<React.SetStateAction<AttendanceRecord[]>>;
   specialEvents: SpecialEvent[];
   setSpecialEvents: React.Dispatch<React.SetStateAction<SpecialEvent[]>>;
+  churchProfiles?: ChurchProfile[];
+  setChurchProfiles?: React.Dispatch<React.SetStateAction<ChurchProfile[]>>;
   triggerToast: (icon: string, message: string) => void;
 }
 
@@ -24,9 +26,11 @@ export default function ChurchManagement({
   setAttendanceLogs,
   specialEvents,
   setSpecialEvents,
+  churchProfiles = [],
+  setChurchProfiles = () => {},
   triggerToast
 }: ChurchManagementProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"members" | "newcomers" | "attendance" | "events" | "evangelism">("members");
+  const [activeSubTab, setActiveSubTab] = useState<"members" | "newcomers" | "attendance" | "events" | "profiles">("members");
 
   // Search/Filters States
   const [memberSearch, setMemberSearch] = useState("");
@@ -41,6 +45,34 @@ export default function ChurchManagement({
   const [newMemPhone, setNewMemPhone] = useState("");
   const [newMemDemographic, setNewMemDemographic] = useState<any>("Adult");
   const [newMemNotes, setNewMemNotes] = useState("");
+
+  // AI Church Profile states
+  const [showAIProfileModal, setShowAIProfileModal] = useState(false);
+  const [unstructuredText, setUnstructuredText] = useState("");
+  const [extractionLoading, setExtractionLoading] = useState(false);
+  const [hasExtracted, setHasExtracted] = useState(false);
+  const [aiActionType, setAiActionType] = useState<"CREATE" | "UPDATE">("CREATE");
+  const [aiName, setAiName] = useState("");
+  const [aiAddress, setAiAddress] = useState("");
+  const [aiEmail, setAiEmail] = useState("");
+  const [aiPhone, setAiPhone] = useState("");
+  const [aiCountry, setAiCountry] = useState("");
+
+  // Church Profiles Edit/Add States
+  const [editingProfile, setEditingProfile] = useState<ChurchProfile | null>(null);
+  const [showAddProfile, setShowAddProfile] = useState(false);
+  const [profName, setProfName] = useState("");
+  const [profAddress, setProfAddress] = useState("");
+  const [profEmail, setProfEmail] = useState("");
+  const [profPhone, setProfPhone] = useState("");
+  const [profProvince, setProfProvince] = useState("");
+  const [profCountry, setProfCountry] = useState("");
+  const [profBibleVersion, setProfBibleVersion] = useState("ESV");
+
+  // AI Church Parish Extract states
+  const [showAIParmodal, setShowAIParmodal] = useState(false);
+  const [unstructuredParText, setUnstructuredParText] = useState("");
+  const [parExtractionLoading, setParExtractionLoading] = useState(false);
 
   // Newcomer states
   const [newComerName, setNewComerName] = useState("");
@@ -105,6 +137,104 @@ export default function ChurchManagement({
     setNewMemDemographic("Adult");
     setNewMemNotes("");
     setShowAddMember(false);
+  };
+
+  const handleAIProfileExtract = async () => {
+    if (!unstructuredText.trim()) {
+      triggerToast("⚠️", "Please provide some unstructured member info first.");
+      return;
+    }
+    setExtractionLoading(true);
+    setHasExtracted(false);
+    try {
+      const response = await fetch("/api/gemini/church-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: unstructuredText }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to extract profile");
+      }
+      const data = await response.json();
+      const cleanValue = (val: any) => (val === null || val === undefined) ? "" : String(val).trim();
+      setAiActionType(data.action_type || "CREATE");
+      setAiName(cleanValue(data.name));
+      setAiAddress(cleanValue(data.address));
+      setAiEmail(cleanValue(data.email));
+      setAiPhone(cleanValue(data.phone_number));
+      setAiCountry(cleanValue(data.country));
+      setHasExtracted(true);
+      triggerToast("✨", "AI processing complete. Check fields below!");
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", "AI Extraction fell back or failed.");
+    } finally {
+      setExtractionLoading(false);
+    }
+  };
+
+  const handleAISave = () => {
+    if (!aiName.trim()) {
+      triggerToast("⚠️", "Full Name is required to save a record.");
+      return;
+    }
+
+    if (aiActionType === "UPDATE") {
+      // Find a member with matching name or email first
+      const existing = members.find(
+        m => m.name.toLowerCase() === aiName.toLowerCase() || (m.email && m.email.toLowerCase() === aiEmail.toLowerCase())
+      );
+      if (existing) {
+        setMembers(prev => prev.map(m => m.id === existing.id ? {
+          ...m,
+          name: aiName,
+          email: aiEmail,
+          phone: aiPhone,
+          notes: `Address: ${aiAddress || "None"}, Country: ${aiCountry || "None"}. Updated via AI: ${new Date().toLocaleDateString()}`
+        } : m));
+        triggerToast("✓", `AI Directory updated: ${aiName}`);
+      } else {
+        // Fallback to adding new if not found, since updating an unknown member can create it
+        const added: Member = {
+          id: "mem_" + Date.now(),
+          name: aiName,
+          role: "Member",
+          email: aiEmail,
+          phone: aiPhone,
+          demographic: "Adult",
+          status: "Active",
+          joinedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          notes: `Address: ${aiAddress || "None"}, Country: ${aiCountry || "None"}. AI Created (Update requested, not found).`
+        };
+        setMembers(prev => [added, ...prev]);
+        triggerToast("👤", `AI Profile Saved (Created): ${aiName}`);
+      }
+    } else {
+      // CREATE
+      const added: Member = {
+        id: "mem_" + Date.now(),
+        name: aiName,
+        role: "Member",
+        email: aiEmail,
+        phone: aiPhone,
+        demographic: "Adult",
+        status: "Active",
+        joinedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        notes: `Address: ${aiAddress || "None"}, Country: ${aiCountry || "None"}. AI Created.`
+      };
+      setMembers(prev => [added, ...prev]);
+      triggerToast("👤", `AI Profile Saved: ${aiName}`);
+    }
+
+    // Reset states
+    setUnstructuredText("");
+    setAiName("");
+    setAiAddress("");
+    setAiEmail("");
+    setAiPhone("");
+    setAiCountry("");
+    setHasExtracted(false);
+    setShowAIProfileModal(false);
   };
 
   const handleEditSetup = (mem: Member) => {
@@ -199,6 +329,108 @@ export default function ChurchManagement({
     }));
   };
 
+  // Church Profile Handlers
+  const handleEditProfileSetup = (profile: ChurchProfile) => {
+    setEditingProfile(profile);
+    setProfName(profile.name);
+    setProfAddress(profile.address);
+    setProfEmail(profile.email);
+    setProfPhone(profile.phone);
+    setProfProvince(profile.province);
+    setProfCountry(profile.country);
+    setProfBibleVersion(profile.bibleVersion);
+    setShowAddProfile(true);
+  };
+
+  const handleCreateProfileSetup = () => {
+    setEditingProfile(null);
+    setProfName("");
+    setProfAddress("");
+    setProfEmail("");
+    setProfPhone("");
+    setProfProvince("");
+    setProfCountry("");
+    setProfBibleVersion("ESV");
+    setShowAddProfile(true);
+  };
+
+  const handleDeleteProfile = (id: string) => {
+    if (window.confirm("Are you sure you want to delete this Church Profile/Parish?")) {
+      setChurchProfiles(prev => prev.filter(p => p.id !== id));
+      triggerToast("🗑️", "Church Profile deleted successfully.");
+    }
+  };
+
+  const handleSaveProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profName.trim()) {
+      triggerToast("⚠️", "Profile Name is required.");
+      return;
+    }
+
+    if (editingProfile) {
+      setChurchProfiles(prev => prev.map(p => p.id === editingProfile.id ? {
+        ...p,
+        name: profName,
+        address: profAddress,
+        email: profEmail,
+        phone: profPhone,
+        province: profProvince,
+        country: profCountry,
+        bibleVersion: profBibleVersion
+      } : p));
+      triggerToast("✓", "Parish profile updated.");
+      setEditingProfile(null);
+    } else {
+      const added: ChurchProfile = {
+        id: "prof_" + Date.now(),
+        name: profName,
+        address: profAddress,
+        email: profEmail,
+        phone: profPhone,
+        province: profProvince,
+        country: profCountry,
+        bibleVersion: profBibleVersion
+      };
+      setChurchProfiles(prev => [...prev, added]);
+      triggerToast("✓", "New parish profile created.");
+    }
+    setShowAddProfile(false);
+  };
+
+  const handleAIParishExtract = async () => {
+    if (!unstructuredParText.trim()) {
+      triggerToast("⚠️", "Please type or paste some unstructured text description first.");
+      return;
+    }
+    setParExtractionLoading(true);
+    try {
+      const resp = await fetch("/api/gemini/church-parish-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: unstructuredParText })
+      });
+      if (!resp.ok) throw new Error("Server extraction failed");
+      const data = await resp.json();
+      
+      setProfName(data.name || "");
+      setProfAddress(data.address || "");
+      setProfEmail(data.email || "");
+      setProfPhone(data.phone || "");
+      setProfProvince(data.province || "");
+      setProfCountry(data.country || "");
+      setProfBibleVersion(data.bibleVersion || "ESV");
+      
+      triggerToast("✨", "Parish details extracted successfully by AI!");
+      setShowAIParmodal(false);
+      setShowAddProfile(true);
+    } catch (err: any) {
+      triggerToast("❌", "AI Extraction failed, please input manually.");
+    } finally {
+      setParExtractionLoading(false);
+    }
+  };
+
   // Filtered members list
   const filteredMembers = members.filter(m => {
     const matchesSearch = m.name.toLowerCase().includes(memberSearch.toLowerCase()) || 
@@ -216,7 +448,8 @@ export default function ChurchManagement({
           { id: "members", label: "Member Records & Registry", icon: Users },
           { id: "newcomers", label: "First Timers & Follow-Up", icon: UserPlus },
           { id: "attendance", label: "Attendance Visualizers", icon: ClipboardCheck },
-          { id: "events", label: "Special Events & Crusades", icon: Calendar }
+          { id: "events", label: "Special Events & Crusades", icon: Calendar },
+          { id: "profiles", label: "Church & Parish Profiles", icon: Sliders }
         ].map(sub => (
           <button
             key={sub.id}
@@ -268,7 +501,18 @@ export default function ChurchManagement({
 
               <button 
                 onClick={() => {
+                  setShowAIProfileModal(true);
+                  setShowAddMember(false);
+                }}
+                className="bg-[#5B21B6] hover:bg-[#7C3AED] text-white font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 transition border border-[#D4AF37]/30 shadow-md gold-glow"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" /> Church Profile
+              </button>
+
+              <button 
+                onClick={() => {
                   setShowAddMember(true);
+                  setShowAIProfileModal(false);
                   setEditingMember(null);
                 }}
                 className="bg-[#D4AF37] hover:bg-[#F0C940] text-[#0A0F1E] font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 transition"
@@ -324,6 +568,164 @@ export default function ChurchManagement({
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {/* AI Church Profile Extraction Assistant */}
+          {showAIProfileModal && (
+            <div className="bg-[#0D1B3E] border border-purple-500/40 rounded-xl p-4.5 space-y-4 font-sans-raleway animate-fade-in shadow-xl gold-glow">
+              <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                <h4 className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" /> AI-Powered Member Directory Assistant
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setShowAIProfileModal(false)}
+                  className="text-slate-400 hover:text-white text-xs"
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-[11px] text-[#B0C4DE] font-semibold">
+                  Conversational Transcript or Unstructured Biography Text:
+                </label>
+                <textarea
+                  rows={3}
+                  value={unstructuredText}
+                  onChange={e => setUnstructuredText(e.target.value)}
+                  placeholder="e.g. Please register sister Martha Washington, email is wash.martha@faith.com. She is from USA, living at 1600 Glory St, and telephone line is +12025550188..."
+                  className="w-full bg-[#112055] text-white text-xs p-2.5 rounded border border-purple-500/20 focus:border-purple-500 focus:outline-none placeholder:text-slate-500"
+                />
+
+                {/* Simulated profiles to help user check capabilities easily */}
+                <div className="flex flex-wrap gap-2 items-center pt-0.5">
+                  <span className="text-[9px] text-slate-400 uppercase font-mono tracking-wider">Demo Datasets:</span>
+                  <button
+                    type="button"
+                    onClick={() => setUnstructuredText("Please register our new congregation member James Bond at 007 Secret Lane, Canada. Email is double-o-seven@mi6.gov.uk and phone line is +44123456789.")}
+                    className="bg-purple-950/60 hover:bg-purple-900/80 text-purple-200 text-[10px] px-2 py-0.5 rounded border border-purple-800/50 transition font-sans-raleway"
+                  >
+                    + Add James (CREATE)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUnstructuredText("I need to update contact info for our existing member, correcting her email address to mary.j@clover.com and telephone is +14158882233. She is Mary Jane from USA.")}
+                    className="bg-purple-950/60 hover:bg-purple-900/80 text-purple-200 text-[10px] px-2 py-0.5 rounded border border-purple-800/50 transition font-sans-raleway"
+                  >
+                    ✎ Update Mary (UPDATE)
+                  </button>
+                </div>
+              </div>
+
+              {/* Explicit extraction button named "Church Profile" */}
+              <div className="flex justify-start">
+                <button
+                  type="button"
+                  id="church-profile"
+                  disabled={extractionLoading}
+                  onClick={handleAIProfileExtract}
+                  className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-1.5 px-4 rounded-lg flex items-center gap-1.5 transition border border-[#D4AF37]/30 shadow-md transform active:scale-95 disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" />
+                  {extractionLoading ? "AI Processing..." : "Church Profile"}
+                </button>
+              </div>
+
+              {/* Editable results form matching schema fields */}
+              {hasExtracted && (
+                <div className="bg-[#050C24]/80 border border-purple-500/25 rounded-lg p-3.5 space-y-3 animate-fade-in text-left">
+                  <div className="border-b border-white/5 pb-1 flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-wider font-sans-raleway">
+                      Extracted Profile Card (Editable)
+                    </span>
+                    <span className="bg-purple-900/80 text-purple-200 text-[9px] font-bold px-2 py-0.5 rounded border border-purple-800 uppercase tracking-widest font-mono">
+                      Action Type: {aiActionType}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Action Type</label>
+                      <select
+                        value={aiActionType}
+                        onChange={e => setAiActionType(e.target.value as any)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                      >
+                        <option value="CREATE">CREATE (Register New Member)</option>
+                        <option value="UPDATE">UPDATE (Update Existing Member)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Name</label>
+                      <input
+                        type="text"
+                        value={aiName}
+                        onChange={e => setAiName(e.target.value)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Address</label>
+                      <input
+                        type="text"
+                        value={aiAddress}
+                        onChange={e => setAiAddress(e.target.value)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                        placeholder="null"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Email Address</label>
+                      <input
+                        type="email"
+                        value={aiEmail}
+                        onChange={e => setAiEmail(e.target.value)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                        placeholder="null"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Phone Number</label>
+                      <input
+                        type="text"
+                        value={aiPhone}
+                        onChange={e => setAiPhone(e.target.value)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                        placeholder="null"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-300 font-semibold mb-0.5">Country</label>
+                      <input
+                        type="text"
+                        value={aiCountry}
+                        onChange={e => setAiCountry(e.target.value)}
+                        className="w-full bg-[#112055] text-white text-xs p-1.5 rounded border border-white/5 focus:outline-none"
+                        placeholder="null"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setHasExtracted(false)}
+                      className="bg-transparent border border-white/15 text-slate-300 hover:text-white text-xs px-3 py-1 rounded"
+                    >
+                      Reset Draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAISave}
+                      className="bg-green-600 hover:bg-green-500 text-white font-bold text-xs px-4 py-1 rounded transition flex items-center gap-1 shadow-md"
+                    >
+                      ✓ Save & Sync Registry
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -718,6 +1120,291 @@ export default function ChurchManagement({
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. CHURCH & PARISH PROFILES */}
+      {activeSubTab === "profiles" && (
+        <div className="space-y-4 font-sans text-[#B0C4DE]">
+          <div className="border border-[#D4AF37]/30 bg-[#0D1B3E] p-4 rounded-xl space-y-4 gold-glow">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+              <div>
+                <h3 className="text-sm font-serif-cinzel font-bold text-white flex items-center gap-1.5">
+                  <Sliders className="w-4 h-4 text-[#D4AF37]" /> Parish & Church Profiles
+                </h3>
+                <p className="text-[11px] text-[#B0C4DE]/80 mt-1">
+                  Manage the official addresses, study Bibles, contacts, and identities of different campuses.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAIParmodal(true)}
+                  className="bg-purple-900/80 hover:bg-purple-800 border border-purple-500/50 text-white font-bold text-xs py-1.8 px-3 rounded-lg flex items-center gap-1.5 transition gold-glow shadow-md cursor-pointer text-center"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-300" /> AI Parish Auto-Fill
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateProfileSetup}
+                  className="bg-[#D4AF37] hover:bg-[#F0C940] text-[#0A0F1E] font-bold text-xs py-1.8 px-3 rounded-lg flex items-center gap-1.5 transition shadow-sm cursor-pointer text-center"
+                >
+                  <Plus className="w-3.5 h-3.5" /> New Profile
+                </button>
+              </div>
+            </div>
+
+            {/* Profiles Container grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(!churchProfiles || churchProfiles.length === 0) ? (
+                <div className="md:col-span-2 bg-[#0A0F1E] border border-white/5 rounded-xl p-8 text-center text-slate-400">
+                  <Sliders className="w-8 h-8 text-slate-500 mx-auto mb-2 opacity-55" />
+                  <p className="text-sm font-bold">No Church/Parish profiles registry records found.</p>
+                  <p className="text-xs text-slate-500 mt-1">Use the "New Profile" button or the AI Auto-Fill to populate church branches.</p>
+                </div>
+              ) : (
+                churchProfiles.map(p => (
+                  <div key={p.id} className="relative bg-[#112055]/30 border border-[#D4AF37]/20 hover:border-[#D4AF37]/50 rounded-xl p-4 transition-all duration-200 shadow-md flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start">
+                        <h4 className="font-serif-cinzel text-white font-bold text-sm tracking-wide">{p.name}</h4>
+                        <span className="bg-[#D4AF37]/10 border border-[#D4AF37]/35 text-[#D4AF37] font-mono text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">
+                          {p.bibleVersion} Target
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1.5 text-xs text-slate-300">
+                        <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📍 Sanctuary Location:</span> {p.address}</p>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📧 Representative Email:</span> {p.email}</p>
+                          <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📞 Parish Hotline:</span> {p.phone}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/5 font-mono text-[10.5px]">
+                          <p><span className="text-slate-450 font-normal text-[9px] uppercase block">Province/State:</span> <span className="text-white font-medium">{p.province}</span></p>
+                          <p><span className="text-slate-450 font-normal text-[9px] uppercase block">Country:</span> <span className="text-white font-medium">{p.country}</span></p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 border-t border-white/5 pt-2.5 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleEditProfileSetup(p)}
+                        className="text-slate-300 hover:text-white bg-[#0A0F1E] border border-white/10 hover:border-[#D4AF37]/25 text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3 text-[#D4AF37]" /> Edit Profile
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProfile(p.id)}
+                        className="text-red-400 hover:text-red-300 bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        <Trash className="w-3 h-3" /> Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CHURCH PROFILE EDIT/ADD MODAL ELEMENT */}
+      {showAddProfile && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
+          <div className="bg-[#0D1B3E] border border-[#D4AF37]/50 rounded-2xl w-full max-w-lg p-5 space-y-4 gold-glow">
+            <div className="border-b border-[#D4AF37]/25 pb-2.5 flex justify-between items-center">
+              <h3 className="text-sm font-serif-cinzel font-bold text-white tracking-wide">
+                {editingProfile ? "EDIT PARISH CHURCH PROFILE" : "REGISTER NEW PARISH PROFILE"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddProfile(false)}
+                className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfileSubmit} className="space-y-3.5 text-xs text-slate-300">
+              <div className="space-y-1">
+                <label className="block text-[#B0C4DE] font-semibold">Parish/Assembly Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sovereign Grace Assembly, Lagos West"
+                  value={profName}
+                  onChange={e => setProfName(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Parish Contact Email</label>
+                  <input
+                    type="email"
+                    placeholder="parish@faithflow.org"
+                    value={profEmail}
+                    onChange={e => setProfEmail(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Parish Hotline Phone</label>
+                  <input
+                    type="text"
+                    placeholder="+234 812-345-6789"
+                    value={profPhone}
+                    onChange={e => setProfPhone(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[#B0C4DE] font-semibold">Sanctuary Address Location</label>
+                <input
+                  type="text"
+                  placeholder="12 Praise Gate Avenue, Holy Ghost Estate"
+                  value={profAddress}
+                  onChange={e => setProfAddress(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Region/Province</label>
+                  <input
+                    type="text"
+                    placeholder="Lagos Province 5"
+                    value={profProvince}
+                    onChange={e => setProfProvince(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Country Location</label>
+                  <input
+                    type="text"
+                    placeholder="Nigeria"
+                    value={profCountry}
+                    onChange={e => setProfCountry(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Bible Translation Type</label>
+                  <select
+                    value={profBibleVersion}
+                    onChange={e => setProfBibleVersion(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/15 focus:border-[#D4AF37]/60 outline-none"
+                  >
+                    <option value="ESV">ESV (English Standard)</option>
+                    <option value="NKJV">NKJV (New King James)</option>
+                    <option value="KJV">KJV (King James Version)</option>
+                    <option value="NIV">NIV (New International)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setShowAddProfile(false)}
+                  className="bg-[#0A0F1E] hover:bg-[#112055] text-[#B0C4DE] px-4 py-2 rounded-xl border border-white/10 transition text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#D4AF37] hover:bg-[#F0C940] text-black px-5 py-2 rounded-xl transition font-bold text-xs flex items-center gap-1 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save Profile Details
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI PARISH PROFILE EXTRACT ASSISTANT MODAL ELEMENT */}
+      {showAIParmodal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
+          <div className="bg-[#0D1B3E] border border-[#D4AF37] rounded-2xl w-full max-w-lg p-5 space-y-4 gold-glow">
+            <div className="border-b border-[#D4AF37]/20 pb-2 flex justify-between items-center">
+              <h3 className="text-sm font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-[#D4AF37]" /> AI-POWERED PARISH PROFILE EXTRACTOR
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAIParmodal(false)}
+                className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300 font-sans-raleway">
+              <p>
+                Paste unstructured notes, promotional flyers, church announcements, letterhead snippets, or emails containing your parish general details. Our **Copier AI engine** will automatically isolate names, telephone numbers, addresses, study translations, and map properties.
+              </p>
+              
+              <div className="space-y-1.5">
+                <label className="block text-[#B0C4DE] font-semibold text-[11px]">Unstructured Sanctuary Branch Details:</label>
+                <textarea
+                  placeholder="e.g. 'We study NKJV. Our branch, Sovereign Hope Center, is located in Tema, Greater Accra, Ghana. Drop by at 5 Main Street or email hope@faithflow.org. Hotline is +233-555-0101.'"
+                  value={unstructuredParText}
+                  onChange={e => setUnstructuredParText(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-3 rounded-xl border border-[#D4AF37]/20 focus:border-[#D4AF37]/50 h-32 outline-none resize-none text-[11px]"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-2 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => {
+                  setUnstructuredParText("We are Sovereign Grace Assembly, located at 15 Sanctuary Gate, Lagos Province 1, Nigeria. People can reach us at west@faithflow.org or call +234 81 5555 1212. We prefer learning from the English Standard Version (ESV).");
+                  triggerToast("📝", "Loaded realistic sample parish details.");
+                }}
+                className="text-[10px] text-[#D4AF37] hover:underline cursor-pointer"
+              >
+                Try sample text
+              </button>
+              
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAIParmodal(false)}
+                  className="bg-[#0A0F1E] hover:bg-slate-950 text-[#B0C4DE] border border-white/10 px-3.5 py-1.8 rounded-xl transition text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={parExtractionLoading}
+                  onClick={handleAIParishExtract}
+                  className="bg-purple-800 hover:bg-purple-700 disabled:bg-purple-950 disabled:text-purple-400 text-white border border-purple-500 font-semibold px-4 py-1.8 rounded-xl flex items-center gap-1.5 cursor-pointer text-xs transition-colors shadow-lg"
+                >
+                  {parExtractionLoading ? (
+                    <span className="flex items-center gap-1.5 text-center justify-center">
+                      <span className="animate-spin text-[10px] inline-block h-3 w-3 border-2 border-white rounded-full border-t-transparent" />
+                      Interrogating Gemini AI...
+                    </span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-purple-300 animate-pulse" />
+                      Run AI Extraction
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
