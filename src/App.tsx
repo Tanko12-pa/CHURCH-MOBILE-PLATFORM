@@ -245,7 +245,10 @@ export default function App() {
       phone: "+234 815 555 1212",
       province: "Lagos Province 1",
       country: "Nigeria",
-      bibleVersion: "ESV"
+      bibleVersion: "ESV",
+      visionStatement: "To tabernacle in the divine presence, raising a covenant-aligned global assembly established in sovereign grace, truth, and unyielding apostolic power.",
+      clergyLeadership: "Apostle David Sovereign (Presiding Bishop) & General Church Council",
+      additionalNotes: "The apex focal hub of the FaithFlow covenant network, leading global administration and central ecclesiastical registries."
     },
     {
       id: "prof_2",
@@ -255,7 +258,10 @@ export default function App() {
       phone: "+233 244 999 0000",
       province: "Greater Accra Region",
       country: "Ghana",
-      bibleVersion: "NKJV"
+      bibleVersion: "NKJV",
+      visionStatement: "To establish a light-bearing assembly where the Holy Temple presence rests, preparing consecrated disciples for supernatural ministry assignments.",
+      clergyLeadership: "Reverend Dr. Emmanuel Kojo (Parish Presbyter) & Worship Guardians",
+      additionalNotes: "A thriving local branch sanctuary operating in high-faith fellowship and active community discipleship programs."
     }
   ]);
 

@@ -2087,6 +2087,63 @@ You must output your final extraction exclusively as a valid JSON object matchin
   }
 });
 
+// AI Refinery for Church & Parish Profiles
+app.post("/api/gemini/refine-profile", async (req, res) => {
+  const { name, address, bibleVersion, currentVision, currentClergy, currentNotes } = req.body;
+  
+  const systemPrompt = `# SYSTEM INSTRUCTIONS: Majestic Church Profile Refiner
+You are an elite, theological and literary advisor specializing in crafting majestic, covenant-aligned identities for local church parishes on the FaithFlow Ministry Platform.
+Your goal is to take a parish's basic information and any rough drafts of their Vision Statement, Clergy/Leadership structure, and Additional Notes, and refine them into gorgeous, inspiring, high-contrast, covenantal expressions with deep spiritual depth.
+
+Input parameters:
+- Name: ${name || "Unknown Parish Branch"}
+- Address: ${address || "Unknown Sanctuary"}
+- Bible Version study focus: ${bibleVersion || "ESV"}
+
+Produce a majestic response matching the requested schema fields:
+1. visionStatement: A highly inspiring, theological and bold vision statement of 2-3 sentences max. Use phrases that denote covenant alignment, sovereign grace, divine assignment, or tabernacling presence.
+2. clergyLeadership: A professional and majestic outline of leadership roles (e.g. Senior Pastor, Covenant Elders, Worship Guardians).
+3. additionalNotes: A high-faith-filled declaration or note about the parish's ministry.
+
+OUTPUT MUST BE EXCLUSIVELY VALID JSON according to the specified schema. Keep it clean and elegant.`;
+
+  try {
+    const ai = getGenAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `Please refine and elevate the following draft details into theological magnificence:
+- Draft Vision: "${currentVision || ""}"
+- Draft Clergy: "${currentClergy || ""}"
+- Draft Notes: "${currentNotes || ""}"`,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            visionStatement: { type: Type.STRING, description: "Refined, inspiring spiritual vision statement of covenant alignment." },
+            clergyLeadership: { type: Type.STRING, description: "Highly polished clerical and leadership list/description" },
+            additionalNotes: { type: Type.STRING, description: "Spiritual declaration or additional ministry focus details" }
+          },
+          required: ["visionStatement", "clergyLeadership", "additionalNotes"]
+        }
+      }
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    res.json({ ...parsed, error: false });
+  } catch (err: any) {
+    console.warn("Gemini Profile Refine failed:", err);
+    res.json({
+      visionStatement: "To tabernacle in the divine presence, raising a covenant-aligned generation established in sovereign grace and unyielding faith.",
+      clergyLeadership: "Reverend Presbyter & Covenant Board of Elders",
+      additionalNotes: "An assembly of faith-filled believers, walking in our divine destiny with signs and wonders following.",
+      error: true
+    });
+  }
+});
+
 // API index route
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", time: new Date().toISOString() });

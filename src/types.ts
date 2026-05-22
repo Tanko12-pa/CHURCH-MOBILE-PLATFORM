@@ -7,6 +7,9 @@ export interface ChurchProfile {
   province: string;
   country: string;
   bibleVersion: string;
+  visionStatement?: string;
+  clergyLeadership?: string;
+  additionalNotes?: string;
 }
 
 export interface Member {

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, Download, Sliders, Save } from "lucide-react";
+import { Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, Download, Sliders, Save, ChevronDown, ChevronUp, BookOpen, Award } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Member, NewComer, AttendanceRecord, SpecialEvent, ChurchProfile } from "../types";
 
@@ -68,6 +68,11 @@ export default function ChurchManagement({
   const [profProvince, setProfProvince] = useState("");
   const [profCountry, setProfCountry] = useState("");
   const [profBibleVersion, setProfBibleVersion] = useState("ESV");
+  const [profVisionStatement, setProfVisionStatement] = useState("");
+  const [profClergyLeadership, setProfClergyLeadership] = useState("");
+  const [profAdditionalNotes, setProfAdditionalNotes] = useState("");
+  const [refineLoading, setRefineLoading] = useState(false);
+  const [expandedProfiles, setExpandedProfiles] = useState<Record<string, boolean>>({});
 
   // AI Church Parish Extract states
   const [showAIParmodal, setShowAIParmodal] = useState(false);
@@ -339,6 +344,9 @@ export default function ChurchManagement({
     setProfProvince(profile.province);
     setProfCountry(profile.country);
     setProfBibleVersion(profile.bibleVersion);
+    setProfVisionStatement(profile.visionStatement || "");
+    setProfClergyLeadership(profile.clergyLeadership || "");
+    setProfAdditionalNotes(profile.additionalNotes || "");
     setShowAddProfile(true);
   };
 
@@ -351,6 +359,9 @@ export default function ChurchManagement({
     setProfProvince("");
     setProfCountry("");
     setProfBibleVersion("ESV");
+    setProfVisionStatement("");
+    setProfClergyLeadership("");
+    setProfAdditionalNotes("");
     setShowAddProfile(true);
   };
 
@@ -377,7 +388,10 @@ export default function ChurchManagement({
         phone: profPhone,
         province: profProvince,
         country: profCountry,
-        bibleVersion: profBibleVersion
+        bibleVersion: profBibleVersion,
+        visionStatement: profVisionStatement,
+        clergyLeadership: profClergyLeadership,
+        additionalNotes: profAdditionalNotes
       } : p));
       triggerToast("✓", "Parish profile updated.");
       setEditingProfile(null);
@@ -390,12 +404,52 @@ export default function ChurchManagement({
         phone: profPhone,
         province: profProvince,
         country: profCountry,
-        bibleVersion: profBibleVersion
+        bibleVersion: profBibleVersion,
+        visionStatement: profVisionStatement,
+        clergyLeadership: profClergyLeadership,
+        additionalNotes: profAdditionalNotes
       };
       setChurchProfiles(prev => [...prev, added]);
       triggerToast("✓", "New parish profile created.");
     }
     setShowAddProfile(false);
+  };
+
+  const handleRefineProfile = async () => {
+    if (!profName.trim()) {
+      triggerToast("⚠️", "Please fill in the Parish/Assembly Name first.");
+      return;
+    }
+    setRefineLoading(true);
+    try {
+      const resp = await fetch("/api/gemini/refine-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profName,
+          address: profAddress,
+          bibleVersion: profBibleVersion,
+          currentVision: profVisionStatement,
+          currentClergy: profClergyLeadership,
+          currentNotes: profAdditionalNotes
+        })
+      });
+      if (!resp.ok) throw new Error("Correction server error");
+      const data = await resp.json();
+      
+      setProfVisionStatement(data.visionStatement || "");
+      setProfClergyLeadership(data.clergyLeadership || "");
+      setProfAdditionalNotes(data.additionalNotes || "");
+      
+      triggerToast("✨", "Spiritual parameters refined to supreme theological clarity.");
+    } catch (err) {
+      triggerToast("❌", "Failed to refine details. Using high-faith fallback.");
+      setProfVisionStatement("To tabernacle in the divine presence, raising a covenant-aligned generation established in sovereign grace.");
+      setProfClergyLeadership("Reverend Presbyter & Covenant Council");
+      setProfAdditionalNotes("An anointed assembly walking in divine assignments.");
+    } finally {
+      setRefineLoading(false);
+    }
   };
 
   const handleAIParishExtract = async () => {
@@ -420,6 +474,10 @@ export default function ChurchManagement({
       setProfProvince(data.province || "");
       setProfCountry(data.country || "");
       setProfBibleVersion(data.bibleVersion || "ESV");
+      // Set default draft values to be refined
+      setProfVisionStatement("");
+      setProfClergyLeadership("");
+      setProfAdditionalNotes("");
       
       triggerToast("✨", "Parish details extracted successfully by AI!");
       setShowAIParmodal(false);
@@ -1166,47 +1224,126 @@ export default function ChurchManagement({
                   <p className="text-xs text-slate-500 mt-1">Use the "New Profile" button or the AI Auto-Fill to populate church branches.</p>
                 </div>
               ) : (
-                churchProfiles.map(p => (
-                  <div key={p.id} className="relative bg-[#112055]/30 border border-[#D4AF37]/20 hover:border-[#D4AF37]/50 rounded-xl p-4 transition-all duration-200 shadow-md flex flex-col justify-between">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start">
-                        <h4 className="font-serif-cinzel text-white font-bold text-sm tracking-wide">{p.name}</h4>
-                        <span className="bg-[#D4AF37]/10 border border-[#D4AF37]/35 text-[#D4AF37] font-mono text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">
-                          {p.bibleVersion} Target
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-1.5 text-xs text-slate-300">
-                        <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📍 Sanctuary Location:</span> {p.address}</p>
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📧 Representative Email:</span> {p.email}</p>
-                          <p><span className="text-slate-450 font-semibold block text-[10px] uppercase tracking-wider font-mono">📞 Parish Hotline:</span> {p.phone}</p>
+                churchProfiles.map(p => {
+                  const isExpanded = !!expandedProfiles[p.id];
+                  return (
+                    <div key={p.id} className="relative bg-[#09112E] hover:bg-[#0C173E] border border-[#D4AF37]/30 hover:border-[#D4AF37]/75 rounded-xl p-4.5 transition-all duration-300 shadow-xl flex flex-col justify-between gold-glow">
+                      <div className="space-y-3">
+                        {/* Header */}
+                        <div className="flex justify-between items-start gap-2 border-b border-[#D4AF37]/25 pb-2.5">
+                          <div className="space-y-0.5 font-sans-raleway">
+                            <span className="text-[9px] uppercase tracking-widest font-mono text-[#D4AF37] font-bold">Covenant Sanctuary</span>
+                            <h4 className="font-serif-cinzel text-white font-bold text-sm tracking-wide leading-tight">{p.name}</h4>
+                          </div>
+                          <span className="bg-[#D4AF37]/10 border border-[#D4AF37]/35 text-[#D4AF37] font-mono text-[9px] uppercase font-bold px-2 py-0.5 rounded shadow-sm shrink-0">
+                            🛡️ {p.bibleVersion} Target
+                          </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/5 font-mono text-[10.5px]">
-                          <p><span className="text-slate-450 font-normal text-[9px] uppercase block">Province/State:</span> <span className="text-white font-medium">{p.province}</span></p>
-                          <p><span className="text-slate-450 font-normal text-[9px] uppercase block">Country:</span> <span className="text-white font-medium">{p.country}</span></p>
+                        
+                        {/* Location and Info */}
+                        <div className="space-y-2 text-xs text-slate-300">
+                          <div className="flex items-start gap-1.5">
+                            <span className="text-[#D4AF37] text-xs shrink-0">📍</span>
+                            <p><span className="text-slate-400 font-normal block text-[9px] uppercase tracking-wider font-mono">Sanctuary Location</span> <span className="text-white font-medium">{p.address}</span></p>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/5">
+                            <div>
+                              <span className="text-slate-400 font-normal block text-[9px] uppercase tracking-wider font-mono">📧 Representative Email</span>
+                              <span className="text-white hover:underline text-[11px] block truncate">{p.email || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-normal block text-[9px] uppercase tracking-wider font-mono">📞 Parish Hotline</span>
+                              <span className="text-white font-mono text-[11px] block">{p.phone || "N/A"}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[#D4AF37]/15 font-mono text-[10px]">
+                            <p><span className="text-slate-500 font-normal text-[8.5px] uppercase block">Province/State</span><span className="text-[#B0C4DE] font-semibold">{p.province}</span></p>
+                            <p><span className="text-slate-500 font-normal text-[8.5px] uppercase block">Country</span><span className="text-[#B0C4DE] font-semibold">{p.country}</span></p>
+                          </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="flex justify-end gap-2 border-t border-white/5 pt-2.5 mt-3">
-                      <button
-                        type="button"
-                        onClick={() => handleEditProfileSetup(p)}
-                        className="text-slate-300 hover:text-white bg-[#0A0F1E] border border-white/10 hover:border-[#D4AF37]/25 text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
-                      >
-                        <Edit2 className="w-3 h-3 text-[#D4AF37]" /> Edit Profile
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteProfile(p.id)}
-                        className="text-red-400 hover:text-red-300 bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
-                      >
-                        <Trash className="w-3 h-3" /> Delete
-                      </button>
+                        {/* Collapsible / Expandable Details section */}
+                        <div className="mt-2.5 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedProfiles(prev => ({ ...prev, [p.id]: !isExpanded }))}
+                            className="w-full bg-[#112055]/50 border border-white/10 hover:border-[#D4AF37]/35 text-[#D4AF37] font-bold text-[10.5px] py-1.5 px-2.5 rounded-lg flex items-center justify-between transition-all cursor-pointer"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <Sliders className="w-3 h-3 text-[#D4AF37]" />
+                              {isExpanded ? "Collapse Celestial Details" : "Expand Covenant Vision & Clergy"}
+                            </span>
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-[#D4AF37]" /> : <ChevronDown className="w-3.5 h-3.5 text-[#D4AF37]" />}
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-2.5 p-3 rounded-lg bg-[#050C24] border border-[#D4AF37]/20 space-y-3 text-xs text-slate-300 animate-fade-in font-sans-raleway">
+                              <div className="space-y-1">
+                                <span className="font-serif-cinzel text-[#D4AF37] font-bold text-[9.5px] uppercase tracking-wider block flex items-center gap-1.5">
+                                  <BookOpen className="w-3 h-3 text-[#D4AF37]" /> Covenant Vision Statement
+                                </span>
+                                <p className="italic text-slate-200 border-l-2 border-[#D4AF37]/50 pl-2 text-[10.5px] leading-relaxed">
+                                  {p.visionStatement || "No vision statement drafted yet. Click 'Refine with AI' to define the covenant identity."}
+                                </p>
+                              </div>
+
+                              <div className="space-y-1 border-t border-white/5 pt-2">
+                                <span className="font-serif-cinzel text-[#D4AF37] font-bold text-[9.5px] uppercase tracking-wider block flex items-center gap-1.5">
+                                  <Award className="w-3.5 h-3.5 text-[#D4AF37]" /> Sanctuary Clergy & Leadership
+                                </span>
+                                <p className="text-slate-200 font-medium text-[10.5px] font-mono bg-[#112055]/40 px-2.5 py-1 rounded border border-white/5">
+                                  {p.clergyLeadership || "No leadership structure registered yet."}
+                                </p>
+                              </div>
+
+                              {p.additionalNotes && (
+                                <div className="space-y-1 border-t border-white/5 pt-2">
+                                  <span className="text-[#D4AF37]/85 font-semibold text-[9.5px] uppercase block">
+                                    ⛪ Ecclesiastical Notes & Status
+                                  </span>
+                                  <p className="text-[#B0C4DE] text-[10px]">
+                                    {p.additionalNotes}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card Actions Footer */}
+                      <div className="flex justify-end gap-2 border-t border-white/5 pt-2.5 mt-3 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Easily launch editor and auto-refine
+                            handleEditProfileSetup(p);
+                            triggerToast("✨", "Reviewing details. Tap 'AI Refine Profile' to optimize.");
+                          }}
+                          className="bg-purple-950/40 hover:bg-purple-900 border border-purple-800/60 text-purple-200 text-[10.5px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-purple-300" /> Refine with AI
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleEditProfileSetup(p)}
+                          className="text-slate-300 hover:text-white bg-[#0A0F1E] border border-white/10 hover:border-[#D4AF37]/35 text-[10.5px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                        >
+                          <Edit2 className="w-3 h-3 text-[#D4AF37]" /> Edit Profile
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProfile(p.id)}
+                          className="text-red-450 hover:text-red-300 bg-red-950/25 hover:bg-red-950/50 border border-red-900/35 text-[10.5px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                        >
+                          <Trash className="w-3 h-3" /> Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -1310,6 +1447,61 @@ export default function ChurchManagement({
                     <option value="KJV">KJV (King James Version)</option>
                     <option value="NIV">NIV (New International)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="border-t border-[#D4AF37]/20 pt-3.5 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="font-serif-cinzel text-xs font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1">
+                    👑 Majestic Covenant Parameters
+                  </span>
+                  
+                  <button
+                    type="button"
+                    disabled={refineLoading}
+                    onClick={handleRefineProfile}
+                    className="bg-purple-900/95 hover:bg-purple-800 disabled:opacity-50 text-[#D4AF37] border border-[#D4AF37]/45 text-[10px] px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer font-sans-raleway font-bold"
+                  >
+                    <Sparkles className="w-3 h-3 text-purple-300 animate-pulse" />
+                    {refineLoading ? "Refining Details..." : "✨ AI Refine Parameters"}
+                  </button>
+                </div>
+                
+                <p className="text-[10px] text-slate-400">
+                  Provide draft notes, then tap <strong className="text-purple-300 font-semibold">AI Refine Parameters</strong> to polish them into a majestic theological and structural expression.
+                </p>
+
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Spiritual Vision Statement</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. To serve as a high-faith sanctuary..."
+                    value={profVisionStatement}
+                    onChange={e => setProfVisionStatement(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none placeholder:text-slate-600 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Sanctuary Clergy & Worship Leadership</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Reverend David Peters (Parish Pastor) & Covenant Board of Elders"
+                    value={profClergyLeadership}
+                    onChange={e => setProfClergyLeadership(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none placeholder:text-slate-600 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[#B0C4DE] font-semibold">Ecclesiastical Notes / Divine Assignment</label>
+                  <input
+                    type="text"
+                    placeholder="Additional logs, branch status declarations, or specific assignments..."
+                    value={profAdditionalNotes}
+                    onChange={e => setProfAdditionalNotes(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none placeholder:text-slate-600 text-xs"
+                  />
                 </div>
               </div>
 
