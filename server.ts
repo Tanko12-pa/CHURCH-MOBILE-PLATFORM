@@ -1517,7 +1517,13 @@ async function handleCreateCheckoutSession(req: any, res: any) {
   const currentUserId = userId || "anonymous";
 
   const appUrl = process.env.APP_URL || "https://ais-dev-ng6d2gj4u7dmga7myqahwn-177908639275.us-west1.run.app";
-  const priceId = planType === "yearly" ? "price_yearly_id" : "price_monthly_id";
+  const priceMapping = {
+    monthly: 'price_1TZepGBMbxh6jv0CeO0OI6mA', // Real $9.99/mo ID
+    yearly: 'price_1TZer4BMbxh6jv0CwVIDbQBN'    // Real $99.99/yr ID
+  };
+
+  const selectedPlan = planType === "yearly" ? "yearly" : "monthly";
+  const priceId = priceMapping[selectedPlan];
 
   const stripeObj = getStripeClient();
 
@@ -1530,16 +1536,16 @@ async function handleCreateCheckoutSession(req: any, res: any) {
 
   try {
     const session = await stripeObj.checkout.sessions.create({
-      payment_method_types: ["card"],
+      mode: 'subscription',
+      payment_method_types: ['card'],
       line_items: [
         {
-          price: priceId,
+          price: priceMapping[selectedPlan], // <-- Must evaluate to the real price_1TZ... string
           quantity: 1,
         },
       ],
-      mode: "subscription",
-      success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/canceled`,
+      success_url: 'https://studio-8169038053-73336.firebaseapp.com/',
+      cancel_url: 'https://studio-8169038053-73336.firebaseapp.com/cancel',
       metadata: {
         userId: currentUserId,
       },
@@ -1591,7 +1597,7 @@ async function handleStripeWebhook(req: any, res: any) {
         const subscription = await stripeObj.subscriptions.retrieve(session.subscription as string) as any;
         expiresAt = new Date(subscription.current_period_end * 1000);
         const price = subscription.items.data[0]?.price?.id;
-        if (price && price.includes("year")) {
+        if (price === 'price_1TZer4BMbxh6jv0CwVIDbQBN' || (price && price.includes("year"))) {
           planType = "yearly";
         }
       }
