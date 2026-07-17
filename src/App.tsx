@@ -201,6 +201,14 @@ export default function App() {
     }
   }, []);
 
+  // Automatic redirect if subscription has expired
+  useEffect(() => {
+    if (subscription?.status === "expired" && activeTab !== "sub") {
+      setActiveTab("sub");
+      triggerToast("⚠️", "Your 7-Day Free Trial has expired. Redirecting to Subscription & Billing.");
+    }
+  }, [subscription, activeTab]);
+
   // Raw states with initial mock data fallback
   const [members, rawSetMembers] = useState<Member[]>([
     { id: "mem_101", name: "Pastor Gabriel Adeyemi", role: "General Overseer", email: "gabriel.adeyemi@faithflow.org", phone: "+234 81 2234 5678", demographic: "Adult", status: "Active", joinedAt: "Jan 12, 2023", notes: "Seminary scholar, expository preacher." },
@@ -737,6 +745,34 @@ export default function App() {
 
         {/* DYNAMIC SCENE PANELS */}
         <main className="flex-1 p-4 md:p-6 overflow-y-auto space-y-6">
+
+          {/* Active Trial Countdown Notification Banner */}
+          {subscription?.status === "trialing" && activeTab !== "sub" && (
+            <div className="bg-[#09112E] border border-[#D4AF37]/50 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl animate-fade-in gold-glow font-sans-raleway">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#D4AF37]/10 border border-[#D4AF37]/35 text-[#D4AF37] rounded-xl shrink-0">
+                  <Clock className="w-5 h-5 text-[#D4AF37] animate-pulse" />
+                </div>
+                <div className="space-y-0.5 text-left">
+                  <span className="text-[9px] font-mono text-[#D4AF37] font-bold uppercase tracking-widest block">
+                    7-Day Free Trial Active
+                  </span>
+                  <p className="text-xs text-white font-semibold">
+                    Your trial is currently active with <span className="text-[#D4AF37] font-bold text-sm">{subscription.daysRemaining} days remaining</span>.
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    Once expired, access will be restricted until a standard monthly or annual subscription is initiated.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab("sub")}
+                className="bg-[#D4AF37] hover:bg-[#F0C940] text-black text-xs font-bold py-1.5 px-4 rounded-xl shadow transition duration-150 shrink-0 cursor-pointer"
+              >
+                Upgrade Plan
+              </button>
+            </div>
+          )}
           
           {/* Trial Expiration Overlay Paywall Block */}
           {subscription?.status === "expired" && activeTab !== "sub" && activeTab !== "settings" ? (
@@ -1140,6 +1176,19 @@ export default function App() {
                     </p>
                   </div>
 
+                  {/* Expired lockout warning notice */}
+                  {subscription?.status === "expired" && (
+                    <div className="max-w-4xl mx-auto bg-gradient-to-r from-red-950/20 to-[#0A0F1E] border border-red-500/40 rounded-2xl p-5 text-center space-y-2.5 animate-pulse shadow-lg gold-glow font-sans-raleway">
+                      <div className="inline-flex p-1.5 bg-red-950/40 border border-red-900/40 text-red-400 rounded-full text-[9px] font-mono uppercase tracking-wider font-bold">
+                        ⚠️ Access Suspended
+                      </div>
+                      <h3 className="text-sm font-bold text-white">Your 7-Day Free Trial Has Fully Expired</h3>
+                      <p className="text-xs text-slate-300 max-w-lg mx-auto">
+                        In accordance with the platform's Free Trial policy, further access is temporarily restricted. Please select and approve one of the available subscription plans below to regain full access to the ecosystem immediately.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Active License Details Badge */}
                   {subscription && (
                     <div className="max-w-4xl mx-auto border border-[#D4AF37]/30 bg-[#0E1B3E] rounded-2xl p-4.5 space-y-3 shadow-lg">
@@ -1197,66 +1246,122 @@ export default function App() {
                   )}
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto">
-                    {/* Package 1 */}
-                    <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
+                    {/* Package 1: Free Trial */}
+                    <div className="border border-white/10 bg-[#09112E] p-5 rounded-2xl space-y-4 flex flex-col justify-between hover:border-[#D4AF37]/30 transition-all duration-300">
                       <div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Beta Trial</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">Evaluation Period</span>
                         <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">7-Day Free Trial</h3>
                         <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                          Full functional testing access to outline generators, BibleGPT databases, guest logs, and audio transcripts.
+                          Evaluate the platform with full functional testing access to outline generators, BibleGPT databases, guest logs, and audio transcripts.
                         </p>
                       </div>
-                      <div className="pt-4">
-                        <p className="text-sm font-bold text-[#D4AF37] mb-3">$0.00 / No obligations</p>
+                      <div className="pt-4 border-t border-white/5">
+                        <p className="text-sm font-bold text-[#D4AF37] mb-3">Free / 7 Days Active Access</p>
                         <button 
                           onClick={() => forceSubscriptionStatus("trialing", "trial", 7)}
-                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
+                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-[#D4AF37] font-bold text-xs py-2 rounded-lg transition duration-150 cursor-pointer"
                         >
-                          Reset / Start Trial
+                          Reset Trial (Sandbox)
                         </button>
                       </div>
                     </div>
 
-                    {/* Package 2 */}
-                    <div className="border border-[#D4AF37] bg-[#112055] p-5 rounded-2xl space-y-4 flex flex-col justify-between gold-glow relative overflow-hidden">
-                      <div className="absolute top-2 right-2 bg-[#D4AF37] text-[#0A0F1E] text-[8px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded">
-                        Popular
+                    {/* Package 2: Monthly Subscription Plan */}
+                    <div className="border border-[#D4AF37]/50 bg-[#112055] p-5 rounded-2xl space-y-4 flex flex-col justify-between hover:border-[#D4AF37] transition-all duration-300 gold-glow relative overflow-hidden">
+                      <div className="absolute top-2 right-2 bg-[#D4AF37] text-black text-[7px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded font-mono">
+                        Standard
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold text-[#D4AF37] uppercase block">Shepherd Monthly</span>
-                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Standard Monthly</h3>
+                        <span className="text-[10px] font-bold text-[#D4AF37] uppercase block tracking-wider">Monthly subscription plan</span>
+                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Monthly Plan</h3>
                         <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                          Full access to live Veo visual generators, Sound doctrine filters, text-to-speech converters, and premium calendar synchronizers.
+                          Provides continuous full access to sermon outline generation, text-to-speech, live multimedia paths, and congregation archives.
                         </p>
                       </div>
-                      <div className="pt-4">
-                        <p className="text-base font-bold text-[#D4AF37] mb-3">$9.99 / Monthly</p>
+                      <div className="pt-4 border-t border-white/5">
+                        <p className="text-base font-bold text-[#D4AF37] mb-3">$9.99 / Month</p>
                         <button 
                           onClick={() => handleSubscribe("monthly")}
-                          className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-extrabold text-xs py-2 rounded-lg transition"
+                          className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-extrabold text-xs py-2 rounded-lg transition duration-150 cursor-pointer"
                         >
                           Subscribe Monthly
                         </button>
                       </div>
                     </div>
 
-                    {/* Package 3 */}
-                    <div className="border border-white/10 bg-[#0D1B3E] p-5 rounded-2xl space-y-4 flex flex-col justify-between">
+                    {/* Package 3: Annual (Yearly) Subscription Plan */}
+                    <div className="border border-white/10 bg-[#09112E] p-5 rounded-2xl space-y-4 flex flex-col justify-between hover:border-[#D4AF37]/30 transition-all duration-300">
                       <div>
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Covenant Yearly</span>
-                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Assembly Yearly</h3>
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Annual (Yearly) Subscription Plan</span>
+                        <h3 className="text-lg font-serif-cinzel font-bold text-white mt-1">Annual Plan</h3>
                         <p className="text-[#B0C4DE] text-xs leading-relaxed mt-2">
-                          Complete, uninterrupted multi-minister access limits. Save 17% and lock in constant premium low-latency processing speeds.
+                          Get uninterrupted annual access to the complete Church Mobile Platform ecosystem. Save roughly 16% on lock-in.
                         </p>
                       </div>
-                      <div className="pt-4">
-                        <p className="text-sm font-bold text-[#D4AF37] mb-3">$99.99 / Year (Best Value)</p>
+                      <div className="pt-4 border-t border-white/5">
+                        <p className="text-sm font-bold text-[#D4AF37] mb-3">$99.99 / Year <span className="text-xs text-emerald-400 font-normal">(Save ~16%)</span></p>
                         <button 
                           onClick={() => handleSubscribe("yearly")}
-                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-white font-semibold text-xs py-2 rounded-lg transition"
+                          className="w-full bg-[#112055] hover:bg-[#112055]/70 border border-[#D4AF37]/30 text-[#D4AF37] font-bold text-xs py-2 rounded-lg transition duration-150 cursor-pointer"
                         >
                           Subscribe Yearly
                         </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Official Subscription and Free Trial Policy Card */}
+                  <div className="max-w-4xl mx-auto bg-gradient-to-b from-[#0D1B3E] to-[#0A0F1E] border border-[#D4AF37]/35 rounded-2xl p-6 space-y-4 shadow-xl text-left gold-glow font-sans-raleway">
+                    <div className="flex items-center gap-2 border-b border-[#D4AF37]/20 pb-3">
+                      <ShieldCheck className="w-5 h-5 text-[#D4AF37]" />
+                      <h3 className="font-serif-cinzel text-[#D4AF37] text-xs font-bold uppercase tracking-widest">
+                        Subscription and Free Trial Policy
+                      </h3>
+                    </div>
+                    
+                    <div className="space-y-3.5 text-xs text-[#B0C4DE] leading-relaxed">
+                      <p>
+                        The AI-Powered <strong className="text-white font-semibold">CHURCH MOBILE PLATFORM</strong> platform shall provide every new user with a <strong className="text-[#D4AF37] font-semibold">7-Day Free Trial</strong> granting full access to the application's features and services.
+                      </p>
+                      
+                      <p>
+                        Upon expiration of the 7-day trial period, the system must automatically restrict further access and redirect the user to the <strong className="text-white font-semibold">Subscription & Billing</strong> page. Users will be required to select and complete payment for one of the available subscription plans before regaining access to the platform:
+                      </p>
+
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-1">
+                        <li className="flex items-start gap-2 bg-[#112055]/30 border border-[#D4AF37]/15 rounded-lg p-3">
+                          <span className="text-[#D4AF37] text-xs mt-0.5">✦</span>
+                          <div>
+                            <strong className="text-white font-bold block text-xs">Monthly Subscription Plan</strong>
+                            <span className="text-[10px] text-slate-400 leading-normal block mt-0.5">Flexible monthly cycle billed automatically at $9.99/mo. Cancel anytime.</span>
+                          </div>
+                        </li>
+                        <li className="flex items-start gap-2 bg-[#112055]/30 border border-[#D4AF37]/15 rounded-lg p-3">
+                          <span className="text-[#D4AF37] text-xs mt-0.5">✦</span>
+                          <div>
+                            <strong className="text-white font-bold block text-xs">Annual (Yearly) Subscription Plan</strong>
+                            <span className="text-[10px] text-slate-400 leading-normal block mt-0.5">Prepaid annual cycle billed at $99.99/yr, providing 16% savings over monthly.</span>
+                          </div>
+                        </li>
+                      </ul>
+
+                      <p className="border-t border-white/5 pt-3">
+                        Access to the application shall remain suspended until a valid subscription payment has been successfully processed. Once payment is confirmed, the user will immediately regain access to all authorized features based on the selected subscription plan.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 text-[10px] text-slate-400 border-t border-white/5">
+                      <div className="bg-[#050C24] border border-white/5 p-2.5 rounded-lg text-center space-y-1">
+                        <span className="text-[#D4AF37] text-xs font-bold block">1. Auto-Tracking</span>
+                        <p>Automatically track and manage the free trial period in real-time from initialization.</p>
+                      </div>
+                      <div className="bg-[#050C24] border border-white/5 p-2.5 rounded-lg text-center space-y-1">
+                        <span className="text-[#D4AF37] text-xs font-bold block">2. Advance Warnings</span>
+                        <p>Display real-time warning countdown banner notifications before trial expiration.</p>
+                      </div>
+                      <div className="bg-[#050C24] border border-white/5 p-2.5 rounded-lg text-center space-y-1">
+                        <span className="text-[#D4AF37] text-xs font-bold block">3. Access Restoration</span>
+                        <p>Instantly renew and unlock the entire ecosystem upon successful payment confirmation.</p>
                       </div>
                     </div>
                   </div>
