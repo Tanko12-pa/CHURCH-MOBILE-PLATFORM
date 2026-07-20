@@ -1675,43 +1675,133 @@ async function handleStripeWebhook(req: any, res: any) {
       process.env.STRIPE_WEBHOOK_SECRET || ""
     );
   } catch (err: any) {
-    console.error("Stripe Webhook Verification Error:", err.message);
+    console.error(`❌ Webhook Signature Verification Failed: ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const userId = session.metadata?.userId || "anonymous";
-    const subscriptionId = session.subscription || "sub_sim_completed";
+  // Handle the specific events enabled in your Stripe dashboard
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const session = event.data.object;
+      console.log(`💰 Checkout completed for session: ${session.id}`);
+      const userId = session.metadata?.userId || "anonymous";
+      const subscriptionId = session.subscription || "sub_sim_completed";
 
-    try {
-      const stripeObj = getStripeClient();
-      let expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30);
-      let planType = "monthly";
+      try {
+        const stripeObj = getStripeClient();
+        let expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30);
+        let planType = "monthly";
 
-      if (stripeObj && session.subscription) {
-        const subscription = await stripeObj.subscriptions.retrieve(session.subscription as string) as any;
-        expiresAt = new Date(subscription.current_period_end * 1000);
-        const price = subscription.items.data[0]?.price?.id;
-        if (price === 'price_1TZer4BMbxh6jv0CwVIDbQBN' || (price && price.includes("year"))) {
-          planType = "yearly";
+        if (stripeObj && session.subscription) {
+          const subscription = await stripeObj.subscriptions.retrieve(session.subscription as string) as any;
+          expiresAt = new Date(subscription.current_period_end * 1000);
+          const price = subscription.items.data[0]?.price?.id;
+          if (price === 'price_1TZer4BMbxh6jv0CwVIDbQBN' || (price && price.includes("year"))) {
+            planType = "yearly";
+          }
         }
-      }
 
-      const dbData = getSubscriptionsDb();
-      dbData[userId] = {
-        userId,
-        subscriptionId,
-        status: "active",
-        expiresAt: expiresAt.toISOString(),
-        planType
-      };
-      saveSubscriptionsDb(dbData);
-      console.log(`Verified completed Stripe license for user: ${userId}`);
-    } catch (e: any) {
-      console.error("Failed completing session state mapping:", e);
+        const dbData = getSubscriptionsDb();
+        dbData[userId] = {
+          userId,
+          subscriptionId,
+          status: "active",
+          expiresAt: expiresAt.toISOString(),
+          planType
+        };
+        saveSubscriptionsDb(dbData);
+        console.log(`Verified completed Stripe license for user: ${userId}`);
+      } catch (e: any) {
+        console.error("Failed completing session state mapping:", e);
+      }
+      break;
     }
+
+    case "customer.subscription.created": {
+      const subCreated = event.data.object;
+      console.log(`🆕 Subscription created: ${subCreated.id}`);
+      break;
+    }
+
+    case "customer.subscription.deleted": {
+      const subDeleted = event.data.object;
+      console.log(`😢 Subscription ended: ${subDeleted.id}`);
+      try {
+        const dbData = getSubscriptionsDb();
+        let found = false;
+        for (const uId of Object.keys(dbData)) {
+          if (dbData[uId] && dbData[uId].subscriptionId === subDeleted.id) {
+            dbData[uId].status = "inactive";
+            found = true;
+          }
+        }
+        if (found) {
+          saveSubscriptionsDb(dbData);
+          console.log(`Updated local subscription record to inactive for subscription: ${subDeleted.id}`);
+        }
+      } catch (err: any) {
+        console.error("Failed handling customer.subscription.deleted database update:", err);
+      }
+      break;
+    }
+
+    case "invoice.paid": {
+      const invoicePaid = event.data.object;
+      console.log(`✅ Invoice paid: ${invoicePaid.id}`);
+      try {
+        const stripeObj = getStripeClient();
+        if (stripeObj && invoicePaid.subscription) {
+          const subId = invoicePaid.subscription;
+          const dbData = getSubscriptionsDb();
+          let found = false;
+          for (const uId of Object.keys(dbData)) {
+            if (dbData[uId] && dbData[uId].subscriptionId === subId) {
+              const subscription = await stripeObj.subscriptions.retrieve(subId as string) as any;
+              const expiresAt = new Date(subscription.current_period_end * 1000);
+              dbData[uId].status = "active";
+              dbData[uId].expiresAt = expiresAt.toISOString();
+              found = true;
+            }
+          }
+          if (found) {
+            saveSubscriptionsDb(dbData);
+            console.log(`Extended local subscription expiration upon invoice payment for: ${subId}`);
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed handling invoice.paid database update:", err);
+      }
+      break;
+    }
+
+    case "invoice.payment_failed": {
+      const invoiceFailed = event.data.object;
+      console.log(`⚠️ Invoice payment failed: ${invoiceFailed.id}`);
+      try {
+        if (invoiceFailed.subscription) {
+          const subId = invoiceFailed.subscription;
+          const dbData = getSubscriptionsDb();
+          let found = false;
+          for (const uId of Object.keys(dbData)) {
+            if (dbData[uId] && dbData[uId].subscriptionId === subId) {
+              dbData[uId].status = "past_due";
+              found = true;
+            }
+          }
+          if (found) {
+            saveSubscriptionsDb(dbData);
+            console.log(`Marked local subscription as past_due for: ${subId}`);
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed handling invoice.payment_failed database update:", err);
+      }
+      break;
+    }
+
+    default:
+      console.log(`Unhandled event type ${event.type}`);
   }
 
   res.json({ received: true });

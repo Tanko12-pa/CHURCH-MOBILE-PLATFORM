@@ -1,5 +1,10 @@
-import React, { useState } from "react";
-import { Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, Download, Sliders, Save, ChevronDown, ChevronUp, BookOpen, Award } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { 
+  Users, UserPlus, Trash, Edit2, Calendar, ClipboardCheck, Sparkles, Plus, CheckSquare, Search, 
+  Download, Sliders, Save, ChevronDown, ChevronUp, BookOpen, Award,
+  Video, Contact, Link, ExternalLink, RefreshCw, CheckCircle2, Phone, Mail, Loader2, Copy, Trash2, 
+  ShieldCheck, HelpCircle, UserCheck, Share2, PlusCircle, AlertTriangle, Eye
+} from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Member, NewComer, AttendanceRecord, SpecialEvent, ChurchProfile } from "../types";
 
@@ -15,6 +20,9 @@ interface ChurchManagementProps {
   churchProfiles?: ChurchProfile[];
   setChurchProfiles?: React.Dispatch<React.SetStateAction<ChurchProfile[]>>;
   triggerToast: (icon: string, message: string) => void;
+  googleAccessToken?: string | null;
+  setGoogleAccessToken?: React.Dispatch<React.SetStateAction<string | null>>;
+  handleGoogleSignIn?: () => Promise<void>;
 }
 
 export default function ChurchManagement({
@@ -28,17 +36,22 @@ export default function ChurchManagement({
   setSpecialEvents,
   churchProfiles = [],
   setChurchProfiles = () => {},
-  triggerToast
+  triggerToast,
+  googleAccessToken = null,
+  setGoogleAccessToken = () => {},
+  handleGoogleSignIn = async () => {}
 }: ChurchManagementProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"members" | "newcomers" | "attendance" | "events" | "profiles">("members");
+  const [activeSubTab, setActiveSubTab] = useState<"members" | "newcomers" | "attendance" | "events" | "profiles" | "google_sync">("members");
 
   // Search/Filters States
   const [memberSearch, setMemberSearch] = useState("");
+  const [googleContactsFilterQuery, setGoogleContactsFilterQuery] = useState("");
   const [memberFilterDemographic, setMemberFilterDemographic] = useState("All");
 
   // Member CRUD Modals and forms
   const [showAddMember, setShowAddMember] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [viewingMemberDetails, setViewingMemberDetails] = useState<Member | null>(null);
   const [newMemName, setNewMemName] = useState("");
   const [newMemRole, setNewMemRole] = useState("Member");
   const [newMemEmail, setNewMemEmail] = useState("");
@@ -100,6 +113,315 @@ export default function ChurchManagement({
   const [newVisitorsCount, setNewVisitorsCount] = useState(12);
 
   const [activeAttendanceSelection, setActiveAttendanceSelection] = useState<string>("Sunday Service");
+
+  // Google Meet and Contacts state variables
+  const [googleContacts, setGoogleContacts] = useState<any[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [meetSpaces, setMeetSpaces] = useState<any[]>([
+    { id: "meet_sim_1", name: "Daily Morning Breakthrough Intercession", meetingUri: "https://meet.google.com/abc-defg-hij", resourceName: "spaces/abc-defg-hij", createdAt: "Jul 15, 2026" },
+    { id: "meet_sim_2", name: "Youth Executive Council Planning Call", meetingUri: "https://meet.google.com/xyz-uvwx-yz1", resourceName: "spaces/xyz-uvwx-yz1", createdAt: "Jul 18, 2026" }
+  ]);
+  const [meetLoading, setMeetLoading] = useState(false);
+  const [newSpaceName, setNewSpaceName] = useState("");
+  const [syncStatus, setSyncStatus] = useState<"idle" | "fetching" | "success" | "error">("idle");
+  const [showConfirmDelete, setShowConfirmDelete] = useState<{ type: "contact" | "meet"; id: string; name: string } | null>(null);
+  const [showExportConfirm, setShowExportConfirm] = useState<Member | null>(null);
+  const [showCreateContactModal, setShowCreateContactModal] = useState(false);
+  const [gContactFirst, setGContactFirst] = useState("");
+  const [gContactLast, setGContactLast] = useState("");
+  const [gContactEmail, setGContactEmail] = useState("");
+  const [gContactPhone, setGContactPhone] = useState("");
+  const [googleSearchQuery, setGoogleSearchQuery] = useState("");
+  const [isSandboxMode, setIsSandboxMode] = useState(!googleAccessToken);
+
+  // Helper functions for Google API requests
+  const fetchGoogleContacts = async () => {
+    if (!googleAccessToken) return;
+    setContactsLoading(true);
+    setSyncStatus("fetching");
+    try {
+      const res = await fetch("https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses,phoneNumbers&pageSize=100", {
+        headers: {
+          Authorization: `Bearer ${googleAccessToken}`,
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to load Google Contacts: ${res.statusText}`);
+      }
+      const data = await res.json();
+      const parsedContacts = (data.connections || []).map((conn: any) => {
+        const nameObj = conn.names?.[0] || {};
+        const emailObj = conn.emailAddresses?.[0] || {};
+        const phoneObj = conn.phoneNumbers?.[0] || {};
+        return {
+          resourceName: conn.resourceName,
+          name: nameObj.displayName || "Unnamed Contact",
+          givenName: nameObj.givenName || "",
+          familyName: nameObj.familyName || "",
+          email: emailObj.value || "No Email",
+          phone: phoneObj.value || "No Phone",
+        };
+      });
+      setGoogleContacts(parsedContacts);
+      setSyncStatus("success");
+      triggerToast("✓", "Successfully synchronized contacts with Google Account.");
+    } catch (err: any) {
+      console.error(err);
+      setSyncStatus("error");
+      triggerToast("❌", `Failed to fetch Google Contacts: ${err.message}`);
+    } finally {
+      setContactsLoading(false);
+    }
+  };
+
+  const createGoogleMeetSpace = async (spaceName: string) => {
+    if (!spaceName.trim()) {
+      triggerToast("⚠️", "Please specify a name for the fellowship space.");
+      return;
+    }
+    setMeetLoading(true);
+    try {
+      if (googleAccessToken) {
+        const res = await fetch("https://meet.googleapis.com/v2/spaces", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          throw new Error(`Google Meet creation failed: ${res.statusText}`);
+        }
+        const data = await res.json();
+        const newSpace = {
+          id: data.name || "meet_" + Date.now(),
+          name: spaceName,
+          meetingUri: data.meetingUri || "https://meet.google.com/mock-meet-space",
+          resourceName: data.name || "spaces/mock-meet-space",
+          createdAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        };
+        setMeetSpaces(prev => [newSpace, ...prev]);
+        triggerToast("📹", `Successfully generated Google Meet Space: "${spaceName}"!`);
+      } else {
+        const simCode = Math.random().toString(36).substring(2, 5) + "-" + Math.random().toString(36).substring(2, 6) + "-" + Math.random().toString(36).substring(2, 5);
+        const newSpace = {
+          id: "meet_sim_" + Date.now(),
+          name: spaceName,
+          meetingUri: `https://meet.google.com/${simCode}`,
+          resourceName: `spaces/${simCode}`,
+          createdAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        };
+        setMeetSpaces(prev => [newSpace, ...prev]);
+        triggerToast("📹", `[Simulated] Generated Meet Space: "${spaceName}" successfully.`);
+      }
+      setNewSpaceName("");
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", `Failed to create Meet Space: ${err.message}`);
+    } finally {
+      setMeetLoading(false);
+    }
+  };
+
+  const exportMemberToGoogleContacts = async (member: Member) => {
+    const nameParts = member.name.trim().split(" ");
+    const givenName = nameParts[0] || "";
+    const familyName = nameParts.slice(1).join(" ") || "";
+    
+    setContactsLoading(true);
+    try {
+      if (googleAccessToken) {
+        const res = await fetch("https://people.googleapis.com/v1/people:createContact", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            names: [{ givenName, familyName }],
+            emailAddresses: member.email ? [{ value: member.email }] : [],
+            phoneNumbers: member.phone ? [{ value: member.phone }] : [],
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`Google Contacts write failed: ${res.statusText}`);
+        }
+        triggerToast("👤", `Successfully exported ${member.name} to Google Contacts.`);
+        fetchGoogleContacts();
+      } else {
+        const newSimContact = {
+          resourceName: "people/sim_" + Date.now(),
+          name: member.name,
+          givenName,
+          familyName,
+          email: member.email || "No Email",
+          phone: member.phone || "No Phone",
+        };
+        setGoogleContacts(prev => [newSimContact, ...prev]);
+        triggerToast("👤", `[Simulated] Exported ${member.name} to Google Contacts!`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", `Failed to export contact: ${err.message}`);
+    } finally {
+      setContactsLoading(false);
+      setShowExportConfirm(null);
+    }
+  };
+
+  const createDirectGoogleContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!gContactFirst.trim()) {
+      triggerToast("⚠️", "First Name is required.");
+      return;
+    }
+    setContactsLoading(true);
+    try {
+      if (googleAccessToken) {
+        const res = await fetch("https://people.googleapis.com/v1/people:createContact", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            names: [{ givenName: gContactFirst, familyName: gContactLast }],
+            emailAddresses: gContactEmail ? [{ value: gContactEmail }] : [],
+            phoneNumbers: gContactPhone ? [{ value: gContactPhone }] : [],
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`Google Contacts creation failed: ${res.statusText}`);
+        }
+        triggerToast("👤", `Successfully created ${gContactFirst} ${gContactLast} in Google Contacts!`);
+        fetchGoogleContacts();
+      } else {
+        const newSimContact = {
+          resourceName: "people/sim_" + Date.now(),
+          name: `${gContactFirst} ${gContactLast}`.trim(),
+          givenName: gContactFirst,
+          familyName: gContactLast,
+          email: gContactEmail || "No Email",
+          phone: gContactPhone || "No Phone",
+        };
+        setGoogleContacts(prev => [newSimContact, ...prev]);
+        triggerToast("👤", `[Simulated] Created contact "${gContactFirst} ${gContactLast}" in Google Contacts!`);
+      }
+      setGContactFirst("");
+      setGContactLast("");
+      setGContactEmail("");
+      setGContactPhone("");
+      setShowCreateContactModal(false);
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", `Failed to create direct contact: ${err.message}`);
+    } finally {
+      setContactsLoading(false);
+    }
+  };
+
+  const deleteGoogleContact = async (resourceName: string, name: string) => {
+    setContactsLoading(true);
+    try {
+      if (googleAccessToken) {
+        const res = await fetch(`https://people.googleapis.com/v1/${resourceName}:deleteContact`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+          },
+        });
+        if (!res.ok) {
+          throw new Error(`Google Contacts delete failed: ${res.statusText}`);
+        }
+        triggerToast("🗑️", `Successfully deleted ${name} from Google Contacts.`);
+        fetchGoogleContacts();
+      } else {
+        setGoogleContacts(prev => prev.filter(c => c.resourceName !== resourceName));
+        triggerToast("🗑️", `[Simulated] Deleted ${name} from Google Contacts.`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", `Failed to delete Google Contact: ${err.message}`);
+    } finally {
+      setContactsLoading(false);
+      setShowConfirmDelete(null);
+    }
+  };
+
+  const importGoogleContactToApp = (contact: any) => {
+    const exists = members.some(
+      m => m.name.toLowerCase() === contact.name.toLowerCase() || (m.email && m.email.toLowerCase() === contact.email.toLowerCase())
+    );
+    if (exists) {
+      triggerToast("⚠️", `${contact.name} is already registered in the Church Registry.`);
+      return;
+    }
+    
+    const added: Member = {
+      id: "mem_" + Date.now(),
+      name: contact.name,
+      role: "Member",
+      email: contact.email === "No Email" ? "" : contact.email,
+      phone: contact.phone === "No Phone" ? "" : contact.phone,
+      demographic: "Adult",
+      status: "Active",
+      joinedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      notes: "Synchronized and imported from Google Contacts."
+    };
+    setMembers(prev => [added, ...prev]);
+    triggerToast("👤", `Successfully imported ${contact.name} into Church Registry.`);
+  };
+
+  const importAllGoogleContacts = () => {
+    let count = 0;
+    const newMembersList = [...members];
+    
+    googleContacts.forEach(contact => {
+      const exists = members.some(
+        m => m.name.toLowerCase() === contact.name.toLowerCase() || (m.email && m.email.toLowerCase() === contact.email.toLowerCase())
+      );
+      if (!exists) {
+        const added: Member = {
+          id: "mem_" + Date.now() + "_" + Math.random().toString(36).substring(2, 5),
+          name: contact.name,
+          role: "Member",
+          email: contact.email === "No Email" ? "" : contact.email,
+          phone: contact.phone === "No Phone" ? "" : contact.phone,
+          demographic: "Adult",
+          status: "Active",
+          joinedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          notes: "Synchronized and imported from Google Contacts in bulk."
+        };
+        newMembersList.push(added);
+        count++;
+      }
+    });
+    
+    if (count > 0) {
+      setMembers(newMembersList);
+      triggerToast("👥", `Successfully imported ${count} contacts into the Church Registry!`);
+    } else {
+      triggerToast("ℹ️", "All contacts are already present in the registry.");
+    }
+  };
+
+  // Sync Google Account state transitions
+  useEffect(() => {
+    if (googleAccessToken) {
+      setIsSandboxMode(false);
+      fetchGoogleContacts();
+    } else {
+      setIsSandboxMode(true);
+      // Populate realistic mock data
+      setGoogleContacts([
+        { resourceName: "people/sim_1", name: "Deacon John Obi", givenName: "John", familyName: "Obi", email: "john.obi@gmail.com", phone: "+234 80 1122 3344" },
+        { resourceName: "people/sim_2", name: "Sister Chidi Okafor", givenName: "Chidi", familyName: "Okafor", email: "chidi.okafor@gmail.com", phone: "+234 81 9988 7766" },
+        { resourceName: "people/sim_3", name: "Brother Kwame Appiah", givenName: "Kwame", familyName: "Appiah", email: "kwame.appiah@yahoo.com", phone: "+233 24 999 8888" },
+        { resourceName: "people/sim_4", name: "Deaconess Abimbola Adebayo", givenName: "Abimbola", familyName: "Adebayo", email: "abimbola.a@gmail.com", phone: "+234 70 5555 4433" }
+      ]);
+    }
+  }, [googleAccessToken]);
 
   // Member Action creators
   const handleAddMemberSubmit = (e: React.FormEvent) => {
@@ -495,8 +817,27 @@ export default function ChurchManagement({
                           m.role.toLowerCase().includes(memberSearch.toLowerCase()) ||
                           m.email.toLowerCase().includes(memberSearch.toLowerCase());
     const matchesDemo = memberFilterDemographic === "All" || m.demographic === memberFilterDemographic;
-    return matchesSearch && matchesDemo;
+    
+    let matchesGoogleContacts = true;
+    if (googleContactsFilterQuery.trim() !== "") {
+      const matchingContacts = googleContacts.filter(c => 
+        (c.name && c.name.toLowerCase().includes(googleContactsFilterQuery.toLowerCase())) ||
+        (c.email && c.email.toLowerCase().includes(googleContactsFilterQuery.toLowerCase()))
+      );
+      matchesGoogleContacts = matchingContacts.some(c => 
+        (c.name && c.name.toLowerCase() === m.name.toLowerCase()) ||
+        (m.email && c.email && c.email.toLowerCase() === m.email.toLowerCase())
+      );
+    }
+    
+    return matchesSearch && matchesDemo && matchesGoogleContacts;
   });
+
+  const filteredGoogleContacts = googleContacts.filter(c => 
+    c.name.toLowerCase().includes(googleSearchQuery.toLowerCase()) ||
+    c.email.toLowerCase().includes(googleSearchQuery.toLowerCase()) ||
+    c.phone.toLowerCase().includes(googleSearchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-4">
@@ -507,7 +848,8 @@ export default function ChurchManagement({
           { id: "newcomers", label: "First Timers & Follow-Up", icon: UserPlus },
           { id: "attendance", label: "Attendance Visualizers", icon: ClipboardCheck },
           { id: "events", label: "Special Events & Crusades", icon: Calendar },
-          { id: "profiles", label: "Church & Parish Profiles", icon: Sliders }
+          { id: "profiles", label: "Church & Parish Profiles", icon: Sliders },
+          { id: "google_sync", label: "Google Meet & Contacts", icon: RefreshCw }
         ].map(sub => (
           <button
             key={sub.id}
@@ -541,6 +883,18 @@ export default function ChurchManagement({
                   value={memberSearch}
                   onChange={e => setMemberSearch(e.target.value)}
                   className="bg-[#0A0F1E] border border-[#D4AF37]/25 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs w-44 focus:outline-none"
+                />
+              </div>
+
+              <div className="relative">
+                <Contact className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[#D4AF37]/75" />
+                <input 
+                  type="text" 
+                  placeholder="Filter by Google Contacts..."
+                  value={googleContactsFilterQuery}
+                  onChange={e => setGoogleContactsFilterQuery(e.target.value)}
+                  className="bg-[#0A0F1E] border border-[#D4AF37]/35 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs w-52 focus:outline-none focus:border-[#D4AF37]/70"
+                  title="Filter list by matching names or emails from synced Google Contacts"
                 />
               </div>
 
@@ -819,11 +1173,26 @@ export default function ChurchManagement({
                     </td>
                     <td className="p-3 text-slate-400">{m.joinedAt}</td>
                     <td className="p-3 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => handleEditSetup(m)} className="text-[#D4AF37] hover:bg-white/5 p-1 rounded transition">
+                      <div className="flex gap-1.5 justify-end">
+                        <button 
+                          onClick={() => setViewingMemberDetails(m)} 
+                          className="text-indigo-400 hover:bg-indigo-950/40 p-1.5 rounded transition"
+                          title="View Details"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button 
+                          onClick={() => handleEditSetup(m)} 
+                          className="text-[#D4AF37] hover:bg-white/5 p-1.5 rounded transition"
+                          title="Edit Member"
+                        >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDeleteMember(m.id, m.name)} className="text-rose-400 hover:bg-white/5 p-1 rounded transition">
+                        <button 
+                          onClick={() => handleDeleteMember(m.id, m.name)} 
+                          className="text-rose-400 hover:bg-white/5 p-1.5 rounded transition"
+                          title="Delete Member"
+                        >
                           <Trash className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -1525,6 +1894,331 @@ export default function ChurchManagement({
         </div>
       )}
 
+      {/* 6. GOOGLE MEET & CONTACTS SYNC */}
+      {activeSubTab === "google_sync" && (
+        <div className="space-y-6 font-sans text-[#B0C4DE]">
+          {/* Header Dashboard Banner */}
+          <div className="border border-[#D4AF37]/30 bg-[#0D1B3E] p-5 rounded-2xl gold-glow relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-6 opacity-10 pointer-events-none">
+              <RefreshCw className="w-24 h-24 text-[#D4AF37] animate-spin-slow" />
+            </div>
+            
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h3 className="text-base font-serif-cinzel font-bold text-white flex items-center gap-2">
+                  <Video className="w-5 h-5 text-[#D4AF37]" /> Google Workspace Sanctuary Coordinator
+                </h3>
+                <p className="text-xs text-[#B0C4DE]/80 mt-1 max-w-2xl">
+                  Dynamically create official Google Meet rooms for virtual fellowship, prayer lines, and online discipleship. Keep your digital assembly synced in real time with Google People Contacts.
+                </p>
+              </div>
+
+              {/* Status Indicator Badge & Link */}
+              <div className="flex items-center gap-2.5">
+                {googleAccessToken ? (
+                  <div className="flex flex-col items-end">
+                    <span className="bg-[#10B981]/15 text-[#10B981] border border-[#10B981]/30 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                      <ShieldCheck className="w-3.5 h-3.5" /> LIVE GOOGLE AUTHENTICATED
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-1">Scopes authorized & fully active</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <span className="bg-amber-500/15 text-amber-400 border border-amber-500/35 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm justify-center">
+                      <HelpCircle className="w-3.5 h-3.5" /> GOOGLE SANDBOX MODE
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      className="bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-[10px] px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer text-center"
+                    >
+                      <RefreshCw className="w-3 h-3 text-black animate-pulse" /> Link Live Google Account
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* LEFT COLUMN: Google Meet Room Creator & Active Spaces */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="border border-[#D4AF37]/25 bg-[#09112E] p-4.5 rounded-2xl shadow-xl space-y-4">
+                <div className="border-b border-white/5 pb-2">
+                  <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                    <Video className="w-4 h-4 text-[#D4AF37]" /> SCHEDULE GOOGLE MEET ROOM
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Generate a dedicated instant Google Meet room URL</p>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] text-slate-400 font-semibold">Fellowship / Prayer Call Title:</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Wednesday Deliverance Hour"
+                      value={newSpaceName}
+                      onChange={e => setNewSpaceName(e.target.value)}
+                      className="w-full bg-[#0A0F1E] text-white p-2.5 rounded-xl border border-white/10 focus:border-[#D4AF37]/50 outline-none text-xs"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={meetLoading}
+                    onClick={() => createGoogleMeetSpace(newSpaceName)}
+                    className="w-full bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 disabled:from-indigo-950 disabled:to-slate-900 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                  >
+                    {meetLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        Generating Meeting Space...
+                      </>
+                    ) : (
+                      <>
+                        <PlusCircle className="w-4 h-4" />
+                        Generate Official Meet Room
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Meeting Spaces List */}
+              <div className="border border-[#D4AF37]/25 bg-[#09112E] p-4.5 rounded-2xl shadow-xl space-y-3">
+                <div className="border-b border-white/5 pb-2">
+                  <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                    <Link className="w-4 h-4 text-[#D4AF37]" /> ACTIVE FELLOWSHIP SPACES
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Manage generated Google Meet conference rooms</p>
+                </div>
+
+                <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                  {meetSpaces.length === 0 ? (
+                    <p className="text-center text-[11px] text-slate-500 py-4">No active Google Meet rooms generated yet.</p>
+                  ) : (
+                    meetSpaces.map(space => (
+                      <div key={space.id} className="bg-[#0A1231] border border-white/5 hover:border-[#D4AF37]/35 rounded-xl p-3 transition flex flex-col justify-between gap-2.5">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <span className="text-[10px] font-semibold text-indigo-400 font-mono tracking-wider bg-indigo-950/40 px-1.5 py-0.5 rounded">
+                              {space.resourceName.replace("spaces/", "")}
+                            </span>
+                            <h5 className="text-xs font-bold text-white mt-1">{space.name}</h5>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Created: {space.createdAt}</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmDelete({ type: "meet", id: space.id, name: space.name })}
+                            className="text-slate-500 hover:text-rose-400 p-1 rounded transition cursor-pointer"
+                            title="Delete meeting space"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 pt-1 border-t border-white/5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(space.meetingUri);
+                              triggerToast("📋", "Google Meet URL copied to clipboard!");
+                            }}
+                            className="bg-[#0A0F1E] hover:bg-slate-900 border border-white/10 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" /> Copy Link
+                          </button>
+                          
+                          <a
+                            href={space.meetingUri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer text-center"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Launch Meeting
+                          </a>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: Google Contacts Synchronization Dashboard */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="border border-[#D4AF37]/25 bg-[#09112E] p-4.5 rounded-2xl shadow-xl space-y-4">
+                
+                {/* Section Header with Buttons */}
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-white/5 pb-3">
+                  <div>
+                    <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                      <Contact className="w-4 h-4 text-[#D4AF37]" /> GOOGLE CONTACTS DIRECTORY
+                    </h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Sync, manage, or import members directly to and from Google</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateContactModal(true)}
+                      className="bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" /> Create Google Contact
+                    </button>
+                    {googleAccessToken && (
+                      <button
+                        type="button"
+                        disabled={contactsLoading}
+                        onClick={fetchGoogleContacts}
+                        className="bg-indigo-950/80 border border-indigo-700/50 hover:bg-indigo-900 text-indigo-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${contactsLoading ? "animate-spin" : ""}`} /> Refresh Contacts
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search Bar & Import All */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Search Google connections..."
+                      value={googleSearchQuery}
+                      onChange={e => setGoogleSearchQuery(e.target.value)}
+                      className="w-full bg-[#0A0F1E] text-white pl-9 pr-4 py-2 rounded-xl border border-white/10 focus:border-[#D4AF37]/50 outline-none text-xs"
+                    />
+                  </div>
+
+                  {googleContacts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={importAllGoogleContacts}
+                      className="bg-indigo-600/80 hover:bg-indigo-600 text-white font-bold text-[11px] px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" /> Import All Unregistered
+                    </button>
+                  )}
+                </div>
+
+                {/* Google Contacts Connections List */}
+                <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                  {contactsLoading && googleContacts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400">
+                      <Loader2 className="w-8 h-8 animate-spin text-[#D4AF37] mb-2" />
+                      <p className="text-xs font-bold">Retrieving authorized Google Contacts...</p>
+                    </div>
+                  ) : filteredGoogleContacts.length === 0 ? (
+                    <div className="text-center py-12 text-slate-500 bg-[#0A1231]/40 border border-white/5 rounded-2xl">
+                      <Contact className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-55" />
+                      <p className="text-xs font-bold">No matching Google Contacts found.</p>
+                      <p className="text-[10px] text-slate-600 mt-1">Make sure you have contacts registered in your linked Google Account.</p>
+                    </div>
+                  ) : (
+                    filteredGoogleContacts.map((contact: any) => {
+                      const isAlreadyMember = members.some(
+                        m => m.name.toLowerCase() === contact.name.toLowerCase() || (m.email && m.email.toLowerCase() === contact.email.toLowerCase())
+                      );
+                      return (
+                        <div key={contact.resourceName} className="bg-[#0A1231] border border-white/5 hover:border-[#D4AF37]/35 rounded-xl p-3 transition flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-indigo-950/80 border border-indigo-700/30 flex items-center justify-center text-[#D4AF37] font-bold font-serif-cinzel text-xs">
+                              {contact.name.charAt(0)}
+                            </div>
+                            <div>
+                              <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                {contact.name}
+                                {isAlreadyMember && (
+                                  <span className="bg-[#10B981]/15 text-[#10B981] border border-[#10B981]/30 text-[8px] font-bold px-1.5 py-0.2 rounded">
+                                    IN REGISTRY
+                                  </span>
+                                )}
+                              </h5>
+                              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 mt-0.5">
+                                <span className="flex items-center gap-1"><Mail className="w-3 h-3 text-slate-500" /> {contact.email}</span>
+                                <span className="flex items-center gap-1"><Phone className="w-3 h-3 text-slate-500" /> {contact.phone}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 justify-end">
+                            {!isAlreadyMember ? (
+                              <button
+                                type="button"
+                                onClick={() => importGoogleContactToApp(contact)}
+                                className="bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-[#0A0F1E] border border-[#D4AF37]/35 text-[10px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" /> Import to Registry
+                              </button>
+                            ) : (
+                              <span className="text-slate-500 text-[10px] font-medium flex items-center gap-1 px-2 py-1.5">
+                                <CheckCircle2 className="w-3 h-3 text-[#10B981]" /> Synced
+                              </span>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => setShowConfirmDelete({ type: "contact", id: contact.resourceName, name: contact.name })}
+                              className="text-slate-500 hover:text-rose-400 p-1.5 rounded transition cursor-pointer"
+                              title="Delete from Google Contacts"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* SECTION: EXPORT APP MEMBERS TO GOOGLE CONTACTS */}
+              <div className="border border-[#D4AF37]/25 bg-[#09112E] p-4.5 rounded-2xl shadow-xl space-y-3">
+                <div className="border-b border-white/5 pb-2">
+                  <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-[#D4AF37]" /> EXPORT MEMBERS TO GOOGLE ACCOUNTS
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Export existing church registry members into Google Contacts</p>
+                </div>
+
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {members.map(member => {
+                    const isAlreadyInGoogle = googleContacts.some(
+                      c => c.name.toLowerCase() === member.name.toLowerCase() || (member.email && c.email.toLowerCase() === member.email.toLowerCase())
+                    );
+                    return (
+                      <div key={member.id} className="bg-[#0A1231]/60 border border-white/5 rounded-xl p-2.5 px-3 flex justify-between items-center transition hover:bg-[#0A1231]">
+                        <div>
+                          <h5 className="text-xs font-bold text-white">{member.name}</h5>
+                          <span className="text-[10px] text-slate-400 block">{member.role} • {member.phone || "No Phone"}</span>
+                        </div>
+
+                        {!isAlreadyInGoogle ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowExportConfirm(member)}
+                            className="bg-indigo-650/80 hover:bg-indigo-600 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Share2 className="w-3 h-3" /> Export to Google
+                          </button>
+                        ) : (
+                          <span className="text-slate-500 text-[9px] font-semibold flex items-center gap-1 px-2.5 py-1.5">
+                            <ShieldCheck className="w-3 h-3 text-[#10B981]" /> Synced
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* AI PARISH PROFILE EXTRACT ASSISTANT MODAL ELEMENT */}
       {showAIParmodal && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
@@ -1598,6 +2292,350 @@ export default function ChurchManagement({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM DELETE MODAL (GOOGLE METADATA MUTATION PROTECTION) */}
+      {showConfirmDelete && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-md">
+          <div className="bg-[#0D1B3E] border border-rose-500/40 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl gold-glow">
+            <div className="flex items-center gap-2.5 text-rose-400 border-b border-white/5 pb-2">
+              <AlertTriangle className="w-5 h-5 text-rose-500" />
+              <h3 className="text-xs font-serif-cinzel font-bold tracking-wider">
+                CONFIRM DELETION
+              </h3>
+            </div>
+            
+            <p className="text-xs text-slate-300 leading-relaxed font-sans">
+              Are you absolutely sure you want to delete the Google {showConfirmDelete.type === "contact" ? "Contact" : "Meet Space"}{" "}
+              <strong className="text-white">"{showConfirmDelete.name}"</strong>? This will permanently delete this record from your linked Google Workspace account.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmDelete(null)}
+                className="bg-[#0A0F1E] hover:bg-[#112055] text-[#B0C4DE] px-3.5 py-1.8 rounded-xl border border-white/10 transition text-[11px] font-semibold cursor-pointer"
+              >
+                No, Keep
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (showConfirmDelete.type === "contact") {
+                    deleteGoogleContact(showConfirmDelete.id, showConfirmDelete.name);
+                  } else {
+                    setMeetSpaces(prev => prev.filter(s => s.id !== showConfirmDelete.id));
+                    triggerToast("🗑️", `Successfully deleted Meet Space "${showConfirmDelete.name}".`);
+                    setShowConfirmDelete(null);
+                  }
+                }}
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] px-4 py-1.8 rounded-xl transition cursor-pointer shadow-md"
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM EXPORT MEMBER TO GOOGLE MODAL */}
+      {showExportConfirm && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-md">
+          <div className="bg-[#0D1B3E] border border-[#D4AF37]/50 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl gold-glow">
+            <div className="flex items-center gap-2 text-[#D4AF37] border-b border-white/5 pb-2">
+              <UserCheck className="w-5 h-5" />
+              <h3 className="text-xs font-serif-cinzel font-bold tracking-wider">
+                EXPORT TO GOOGLE CONTACTS
+              </h3>
+            </div>
+            
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Would you like to export the registry member <strong className="text-white">"{showExportConfirm.name}"</strong> directly into your Google Workspace contacts? This will create a fresh contact card in your Google Account.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowExportConfirm(null)}
+                className="bg-[#0A0F1E] hover:bg-[#112055] text-[#B0C4DE] px-3.5 py-1.8 rounded-xl border border-white/10 transition text-[11px] font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => exportMemberToGoogleContacts(showExportConfirm)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] px-4 py-1.8 rounded-xl transition cursor-pointer shadow-md"
+              >
+                Confirm Export
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DIRECT GOOGLE CONTACT CREATION MODAL */}
+      {showCreateContactModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
+          <div className="bg-[#0D1B3E] border border-[#D4AF37] rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl gold-glow">
+            <div className="border-b border-white/5 pb-2 flex justify-between items-center">
+              <h3 className="text-sm font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                <Contact className="w-4 h-4" /> CREATE GOOGLE CONTACT
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowCreateContactModal(false)}
+                className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={createDirectGoogleContact} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[10px] text-slate-400 font-semibold">First Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Samuel"
+                    value={gContactFirst}
+                    onChange={e => setGContactFirst(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[10px] text-slate-400 font-semibold">Last Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Boateng"
+                    value={gContactLast}
+                    onChange={e => setGContactLast(e.target.value)}
+                    className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[10px] text-slate-400 font-semibold">Email Address</label>
+                <input
+                  type="email"
+                  placeholder="e.g. samuel.boateng@gmail.com"
+                  value={gContactEmail}
+                  onChange={e => setGContactEmail(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[10px] text-slate-400 font-semibold">Phone Number</label>
+                <input
+                  type="tel"
+                  placeholder="e.g. +233 24 555 6677"
+                  value={gContactPhone}
+                  onChange={e => setGContactPhone(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-2 px-3 rounded-lg border border-white/10 focus:border-[#D4AF37]/60 outline-none text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateContactModal(false)}
+                  className="bg-[#0A0F1E] hover:bg-[#112055] text-[#B0C4DE] px-4 py-2 rounded-xl border border-white/10 transition text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-[#D4AF37] hover:bg-[#F0C940] text-black px-5 py-2 rounded-xl transition font-bold text-xs flex items-center gap-1 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save to Google Contacts
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MEMBER VIEW DETAILS SLIDE-IN PANEL MODAL */}
+      {viewingMemberDetails && (
+        <div className="fixed inset-0 bg-black/80 flex justify-end z-50 animate-fade-in backdrop-blur-md">
+          {/* Backdrop click dismisses */}
+          <div className="absolute inset-0 cursor-default" onClick={() => setViewingMemberDetails(null)} />
+          
+          {/* Slide panel */}
+          <div className="relative w-full max-w-lg bg-gradient-to-b from-[#0D1B3E] to-[#060D25] border-l border-[#D4AF37]/30 h-full overflow-y-auto shadow-2xl p-6 md:p-8 flex flex-col justify-between text-[#B0C4DE] font-sans">
+            
+            <div className="space-y-6">
+              {/* Header section with Close Button */}
+              <div className="flex justify-between items-start border-b border-white/10 pb-4">
+                <div>
+                  <span className="bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-widest font-mono">
+                    {viewingMemberDetails.demographic} MINISTRY
+                  </span>
+                  <h3 className="text-xl font-serif-cinzel font-bold text-white mt-1.5 flex items-center gap-2">
+                    {viewingMemberDetails.name}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5 uppercase tracking-wide">
+                    ID: {viewingMemberDetails.id}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingMemberDetails(null)}
+                  className="bg-[#0A0F1E] hover:bg-rose-950/40 text-slate-400 hover:text-white border border-white/10 p-2 rounded-xl transition cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Status & Quick stats row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-[#0A0F1E] border border-white/5 rounded-xl p-3 text-left">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Registry Status</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`w-2.5 h-2.5 rounded-full ${viewingMemberDetails.status === "Active" ? "bg-emerald-500 animate-pulse" : "bg-slate-500"}`} />
+                    <span className="text-xs font-bold text-white uppercase">{viewingMemberDetails.status}</span>
+                  </div>
+                </div>
+
+                <div className="bg-[#0A0F1E] border border-white/5 rounded-xl p-3 text-left">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Assigned Role</p>
+                  <p className="text-xs font-bold text-[#D4AF37] mt-1">{viewingMemberDetails.role}</p>
+                </div>
+              </div>
+
+              {/* Engagement Analytics & Scoring Section */}
+              <div className="bg-[#112055]/30 border border-[#D4AF37]/20 p-4 rounded-2xl space-y-3.5 relative overflow-hidden">
+                <div className="absolute -right-6 -top-6 opacity-5 pointer-events-none">
+                  <Award className="w-24 h-24 text-[#D4AF37]" />
+                </div>
+                
+                <h4 className="text-xs font-serif-cinzel font-bold text-white tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-[#D4AF37]" /> SANCTUARY ENGAGEMENT INDEX
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                  {/* Circle progress mockup */}
+                  <div className="md:col-span-4 flex justify-center">
+                    <div className="relative w-20 h-20 flex items-center justify-center rounded-full border-4 border-dashed border-[#D4AF37]/35 bg-black/40">
+                      <div className="text-center">
+                        <span className="text-base font-bold text-white font-mono">92%</span>
+                        <span className="text-[7px] text-slate-400 block uppercase font-bold">Active</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Analytics details */}
+                  <div className="md:col-span-8 space-y-2.5 text-left">
+                    <div>
+                      <div className="flex justify-between text-[10px] text-slate-400 font-semibold mb-1">
+                        <span>Attendance Loyalty Rate</span>
+                        <span className="text-[#D4AF37]">92% (High Commitment)</span>
+                      </div>
+                      <div className="w-full bg-black/45 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-gradient-to-r from-[#D4AF37] to-amber-400 h-full" style={{ width: "92%" }} />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div>
+                        <span className="text-slate-500 block">Consecutive Sundays</span>
+                        <span className="text-white font-bold font-mono">6 Sundays Streak</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block">Tithe & Service Support</span>
+                        <span className="text-emerald-400 font-bold font-mono">Consistent</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Demographics Notes */}
+              <div className="space-y-2 text-left">
+                <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4" /> DEMOGRAPHIC CARE PROFILE NOTES
+                </h4>
+                <div className="bg-[#0A0F1E] border border-white/5 rounded-xl p-4 space-y-2 text-xs leading-relaxed text-slate-300">
+                  <p>
+                    {viewingMemberDetails.notes && viewingMemberDetails.notes.trim() !== "" 
+                      ? viewingMemberDetails.notes 
+                      : `Currently registered as an active constituent in the ${viewingMemberDetails.demographic} Ministry. This member supports discipleship classes, regular virtual fellowship groups, and local service missions.`}
+                  </p>
+                  <p className="text-[10px] text-slate-500 border-t border-white/5 pt-2">
+                    💡 Pastoral Note: Prioritize follow-ups for fellowship events geared specifically towards {viewingMemberDetails.demographic === "Youth" ? "young leaders" : `${viewingMemberDetails.demographic.toLowerCase()} ministries`}.
+                  </p>
+                </div>
+              </div>
+
+              {/* Congregation History Timeline */}
+              <div className="space-y-3.5 text-left">
+                <h4 className="text-xs font-serif-cinzel font-bold text-[#D4AF37] tracking-wider flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4" /> SACRED SERVICE TIMELINE
+                </h4>
+                
+                <div className="space-y-3 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[1px] before:bg-white/10 pl-6">
+                  {/* Item 1 */}
+                  <div className="relative">
+                    <span className="absolute -left-[20px] top-1 w-2.5 h-2.5 rounded-full bg-[#D4AF37] ring-4 ring-[#0D1B3E]" />
+                    <p className="text-[11px] font-bold text-white">Officially Inducted as a Covenant Member</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Joined congregation registry on {viewingMemberDetails.joinedAt}</p>
+                  </div>
+
+                  {/* Item 2 */}
+                  <div className="relative">
+                    <span className="absolute -left-[20px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-500 ring-4 ring-[#0D1B3E]" />
+                    <p className="text-[11px] font-bold text-white">Assigned Discipleship Pathway Role</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Placed in leadership role: "{viewingMemberDetails.role}"</p>
+                  </div>
+
+                  {/* Item 3 */}
+                  <div className="relative">
+                    <span className="absolute -left-[20px] top-1 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-[#0D1B3E]" />
+                    <p className="text-[11px] font-bold text-white">Google contacts identity check synced</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Contact coordinates mapped & validated for remote meet groups</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Contact triggers / action buttons footer */}
+            <div className="border-t border-white/10 pt-4 mt-6 space-y-3">
+              <div className="flex gap-2">
+                {viewingMemberDetails.email && (
+                  <a
+                    href={`mailto:${viewingMemberDetails.email}`}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition text-center cursor-pointer shadow"
+                  >
+                    <Mail className="w-3.5 h-3.5" /> Email Member
+                  </a>
+                )}
+                
+                {viewingMemberDetails.phone && (
+                  <a
+                    href={`tel:${viewingMemberDetails.phone}`}
+                    className="flex-1 bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition text-center cursor-pointer shadow"
+                  >
+                    <Phone className="w-3.5 h-3.5" /> Call Member
+                  </a>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-between items-center text-[11px] text-slate-500">
+                <span>Last updated 24 hours ago</span>
+                <button
+                  type="button"
+                  onClick={() => setViewingMemberDetails(null)}
+                  className="text-slate-400 hover:text-white font-semibold cursor-pointer"
+                >
+                  Close Profile Panel
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { 
   Flame, Clock, ChevronRight, LayoutDashboard, Calendar, Users, ShieldAlert, BadgeInfo,
   Sliders, Bot, Globe, ShieldCheck, Mail, Volume2, Sparkles, BookOpen, AlertTriangle,
-  Shield, Crown, Star, Sun, Heart, Check, Save, LogIn, LogOut, CloudLightning, ShieldOff, CreditCard
+  Shield, Crown, Star, Sun, Heart, Check, Save, LogIn, LogOut, CloudLightning, ShieldOff, CreditCard,
+  Video, Copy, ExternalLink, Loader2, Link
 } from "lucide-react";
 
 import { 
@@ -419,11 +420,67 @@ export default function App() {
     };
   }, [user]);
 
+  // Google Access Token
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+
+  // Schedule Meeting states
+  const [showScheduleMeetingModal, setShowScheduleMeetingModal] = useState(false);
+  const [meetingTitle, setMeetingTitle] = useState("");
+  const [meetingLoading, setMeetingLoading] = useState(false);
+  const [generatedMeetUrl, setGeneratedMeetUrl] = useState<string | null>(null);
+
+  const handleScheduleGoogleMeet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!meetingTitle.trim()) {
+      triggerToast("⚠️", "Please provide a meeting title.");
+      return;
+    }
+    setMeetingLoading(true);
+    try {
+      if (googleAccessToken) {
+        const res = await fetch("https://meet.googleapis.com/v2/spaces", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          throw new Error(`Google Meet API failed: ${res.statusText}`);
+        }
+        const data = await res.json();
+        setGeneratedMeetUrl(data.meetingUri || "https://meet.google.com/mock-meet-space");
+        triggerToast("📹", `Successfully scheduled Google Meet event: "${meetingTitle}"!`);
+      } else {
+        // Simulation sandbox mode
+        const simCode = Math.random().toString(36).substring(2, 5) + "-" + Math.random().toString(36).substring(2, 6) + "-" + Math.random().toString(36).substring(2, 5);
+        const simUrl = `https://meet.google.com/${simCode}`;
+        setGeneratedMeetUrl(simUrl);
+        triggerToast("📹", `[Sandbox] Generated Simulated Meet Event: "${meetingTitle}"!`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerToast("❌", `Failed to schedule meeting: ${err.message}`);
+    } finally {
+      setMeetingLoading(false);
+    }
+  };
+
   // Auth handler helpers
   const handleGoogleSignIn = async () => {
     try {
       const provider = new GoogleAuthProvider();
+      provider.addScope("https://www.googleapis.com/auth/meetings.space.created");
+      provider.addScope("https://www.googleapis.com/auth/meetings.space.readonly");
+      provider.addScope("https://www.googleapis.com/auth/meetings.space.settings");
+      provider.addScope("https://www.googleapis.com/auth/contacts");
+      
       const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleAccessToken(credential.accessToken);
+      }
       triggerToast("🔐", `Divine authentication successful as ${result.user.displayName || result.user.email}!`);
     } catch (e: any) {
       triggerToast("⚠️", `Authentication error: ${e.message}`);
@@ -433,6 +490,7 @@ export default function App() {
   const handleSignOutAuth = async () => {
     try {
       await signOut(auth);
+      setGoogleAccessToken(null);
       triggerToast("🚪", "Switched back to local simulation database.");
     } catch (e: any) {
       triggerToast("❌", `Failed to sign out: ${e.message}`);
@@ -697,6 +755,22 @@ export default function App() {
                   <ChevronRight className="w-3 h-3 opacity-60" />
                 </button>
               ))}
+
+              {/* Schedule Meeting Sidebar Trigger Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMeetingTitle("");
+                  setGeneratedMeetUrl(null);
+                  setShowScheduleMeetingModal(true);
+                }}
+                className="w-full flex items-center justify-between text-left text-xs px-2.5 py-1.8 rounded-lg border border-[#D4AF37]/20 bg-[#112055]/20 hover:bg-[#112055]/50 hover:border-[#D4AF37]/45 text-[#D4AF37] hover:text-white transition-all duration-200 font-bold cursor-pointer"
+              >
+                <span className="flex items-center gap-2 font-semibold">
+                  <Video className="w-3.5 h-3.5" /> Schedule Meeting
+                </span>
+                <ChevronRight className="w-3 h-3 opacity-80 animate-pulse text-[#D4AF37]" />
+              </button>
             </div>
 
             {/* Group 4: Subscriptions */}
@@ -1044,6 +1118,9 @@ export default function App() {
                 churchProfiles={churchProfiles}
                 setChurchProfiles={setChurchProfiles}
                 triggerToast={triggerToast}
+                googleAccessToken={googleAccessToken}
+                setGoogleAccessToken={setGoogleAccessToken}
+                handleGoogleSignIn={handleGoogleSignIn}
               />
             </div>
           )}
@@ -1711,6 +1788,155 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* 7. SCHEDULE GOOGLE MEET MODAL */}
+      {showScheduleMeetingModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-md">
+          <div className="bg-[#0D1B3E] border border-[#D4AF37] rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl gold-glow text-[#B0C4DE]">
+            
+            {/* Modal Header */}
+            <div className="border-b border-white/10 pb-3 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Video className="w-5 h-5 text-[#D4AF37]" />
+                <h3 className="text-sm font-serif-cinzel font-bold text-white tracking-wider">
+                  SCHEDULE GOOGLE MEET
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScheduleMeetingModal(false)}
+                className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Google Authentication Status Info */}
+            <div className="p-3 bg-[#0A0F1E] border border-white/5 rounded-xl text-xs flex justify-between items-center">
+              <div className="text-left">
+                <p className="font-semibold text-white">Google Integration Status</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {googleAccessToken 
+                    ? "Live connection fully authorized" 
+                    : "Running in isolated sandbox mode"}
+                </p>
+              </div>
+              <div>
+                {googleAccessToken ? (
+                  <span className="bg-[#10B981]/15 text-[#10B981] border border-[#10B981]/30 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    Authorized
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    className="bg-[#D4AF37] hover:bg-[#F0C940] text-black font-extrabold text-[9px] px-2.5 py-1 rounded-lg transition-all"
+                  >
+                    Link Live Account
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleScheduleGoogleMeet} className="space-y-4">
+              <div className="space-y-1 text-left">
+                <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                  Fellowship / Meeting Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Divine Grace Healing Service"
+                  value={meetingTitle}
+                  onChange={e => setMeetingTitle(e.target.value)}
+                  className="w-full bg-[#0A0F1E] text-white p-3 rounded-xl border border-white/10 focus:border-[#D4AF37]/60 outline-none text-xs"
+                />
+              </div>
+
+              {!generatedMeetUrl ? (
+                <button
+                  type="submit"
+                  disabled={meetingLoading}
+                  className="w-full bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 disabled:from-indigo-950 disabled:to-slate-900 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
+                >
+                  {meetingLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      Creating Meet Space...
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-4 h-4" />
+                      Generate Google Meet Event
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div className="space-y-3 pt-2 border-t border-white/5">
+                  <div className="p-3 bg-[#10B981]/10 border border-[#10B981]/30 rounded-xl space-y-1.5 text-left">
+                    <span className="text-[10px] font-bold text-[#10B981] uppercase tracking-wider block">
+                      ✓ MEETING SUCCESSFULLY CREATED
+                    </span>
+                    <p className="text-xs text-white font-semibold">{meetingTitle}</p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <input
+                        type="text"
+                        readOnly
+                        value={generatedMeetUrl}
+                        className="flex-1 bg-black/30 border border-white/10 text-slate-300 font-mono text-[10px] p-2 rounded-lg outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedMeetUrl);
+                          triggerToast("📋", "Google Meet link copied to clipboard!");
+                        }}
+                        className="bg-[#112055] border border-white/15 hover:bg-slate-900 text-slate-200 text-xs p-2 rounded-lg transition"
+                        title="Copy link"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <a
+                      href={generatedMeetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition text-center cursor-pointer shadow"
+                    >
+                      <ExternalLink className="w-4 h-4" /> Launch Call
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMeetingTitle("");
+                        setGeneratedMeetUrl(null);
+                      }}
+                      className="bg-transparent hover:bg-white/5 border border-white/10 text-white text-xs px-4 py-2.5 rounded-xl transition cursor-pointer"
+                    >
+                      New Event
+                    </button>
+                  </div>
+                </div>
+              )}
+            </form>
+
+            {/* Footer Close button */}
+            <div className="pt-2 border-t border-white/5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowScheduleMeetingModal(false)}
+                className="bg-[#0A0F1E] hover:bg-[#112055] text-[#B0C4DE] px-4 py-2 rounded-xl border border-white/10 transition text-xs font-semibold cursor-pointer"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FLOATING GEMINI CONGREGATIONAL AI ASSISTANT CHAT PANEL */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end">
