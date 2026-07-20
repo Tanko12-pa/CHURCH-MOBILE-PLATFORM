@@ -97,17 +97,26 @@ export default function ChurchManagement({
   const [newComerAssignTo, setNewComerAssignTo] = useState("");
   const [newComerNotes, setNewComerNotes] = useState("");
 
+  // Dynamic date helper to initialize form fields with today's date dynamically
+  const getCurrentDateFormatted = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // Event Forms
   const [newEventName, setNewEventName] = useState("");
   const [newEventType, setNewEventType] = useState<any>("Crusade");
   const [newEventVenue, setNewEventVenue] = useState("");
   const [newEventBudget, setNewEventBudget] = useState(1500);
-  const [newEventDate, setNewEventDate] = useState("2026-06-18");
+  const [newEventDate, setNewEventDate] = useState(getCurrentDateFormatted());
   const [newEventExpected, setNewEventExpected] = useState(500);
   const [newEventNotes, setNewEventNotes] = useState("");
 
   // Attendance logging inputs
-  const [attendanceDate, setAttendanceDate] = useState("2026-05-24");
+  const [attendanceDate, setAttendanceDate] = useState(getCurrentDateFormatted());
   const [serviceTypeName, setServiceTypeName] = useState("Sunday Sovereign Grace Service");
   const [attendanceHeadcount, setAttendanceHeadcount] = useState(250);
   const [newVisitorsCount, setNewVisitorsCount] = useState(12);
@@ -1289,7 +1298,7 @@ export default function ChurchManagement({
 
       {/* 3. ATTENDANCE METRICS VISUAL */}
       {activeSubTab === "attendance" && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
           <div className="border border-[#D4AF37]/30 bg-[#0D1B3E] p-4 rounded-xl space-y-3.5 self-start">
             <span className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider block">Service Attendance Intake</span>
             <div>
@@ -1309,6 +1318,15 @@ export default function ChurchManagement({
               </select>
             </div>
             <div>
+              <label className="block text-xs text-[#B0C4DE] mb-0.5">Attendance Log Date</label>
+              <input 
+                type="date" 
+                value={attendanceDate} 
+                onChange={e => setAttendanceDate(e.target.value)} 
+                className="w-full bg-[#0A0F1E] text-white text-xs p-2 rounded border border-[#D4AF37]/20 focus:border-[#D4AF37]/60 outline-none" 
+              />
+            </div>
+            <div>
               <label className="block text-xs text-[#B0C4DE] mb-0.5">Headcount Ledger Total</label>
               <input type="number" value={attendanceHeadcount} onChange={e => setAttendanceHeadcount(Number(e.target.value))} className="w-full bg-[#0A0F1E] text-white text-xs p-2 rounded border border-[#D4AF37]/20" />
             </div>
@@ -1316,7 +1334,7 @@ export default function ChurchManagement({
               <label className="block text-xs text-[#B0C4DE] mb-0.5">First-Time Visitors Total</label>
               <input type="number" value={newVisitorsCount} onChange={e => setNewVisitorsCount(Number(e.target.value))} className="w-full bg-[#0A0F1E] text-white text-xs p-2 rounded border border-[#D4AF37]/20" />
             </div>
-            <button onClick={handleLogAttendanceSubmit} className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-xs py-2 rounded-xl transition">
+            <button onClick={handleLogAttendanceSubmit} className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold text-xs py-2 rounded-xl transition shadow">
               Log Attendance Registry
             </button>
           </div>
@@ -1337,7 +1355,7 @@ export default function ChurchManagement({
               </ResponsiveContainer>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-center text-xs">
+            <div className="grid grid-cols-2 gap-3 text-center text-xs pb-3 border-b border-white/5">
               <div className="bg-[#112055]/30 p-2.5 rounded border border-[#D4AF37]/20">
                 <span className="text-slate-400">Registry average</span>
                 <p className="text-lg font-bold text-[#D4AF37]">
@@ -1347,6 +1365,43 @@ export default function ChurchManagement({
               <div className="bg-[#112055]/30 p-2.5 rounded border border-[#D4AF37]/20">
                 <span className="text-slate-400">Recorded events</span>
                 <p className="text-lg font-bold text-emerald-400">{attendanceLogs.length} assemblies</p>
+              </div>
+            </div>
+
+            {/* Historical list of logged attendances with interactive delete buttons */}
+            <div className="space-y-2 pt-2">
+              <span className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider block">Historical Attendance Records</span>
+              <div className="max-h-[180px] overflow-y-auto space-y-2">
+                {attendanceLogs.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic py-2">No attendance records found.</p>
+                ) : (
+                  [...attendanceLogs].sort((a,b) => b.date.localeCompare(a.date)).map(log => (
+                    <div key={log.id} className="flex justify-between items-center bg-[#0D1B3E]/40 p-2.5 rounded border border-white/5 hover:border-[#D4AF37]/30 transition text-xs">
+                      <div>
+                        <div className="font-semibold text-white">{log.serviceType}</div>
+                        <div className="text-[10px] text-[#B0C4DE]/80 flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono text-[#D4AF37]">{log.date}</span>
+                          <span>&bull;</span>
+                          <span>Total Headcount: <strong className="text-white">{log.attendanceCount}</strong></span>
+                          <span>&bull;</span>
+                          <span>Visitors: <strong className="text-emerald-400">{log.newVisitors}</strong></span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Are you sure you want to delete the attendance log for ${log.date}?`)) {
+                            setAttendanceLogs(prev => prev.filter(item => item.id !== log.id));
+                            triggerToast("🗑️", "Attendance record deleted from database.");
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition cursor-pointer"
+                        title="Delete Record"
+                      >
+                        <Trash className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

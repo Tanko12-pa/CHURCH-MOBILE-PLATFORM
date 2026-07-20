@@ -74,9 +74,136 @@ function getGenAI() {
   return genAIClient;
 }
 
+// Local Persistent Calendar Events Database (Defaulting to July 2026 for the Church Mobile app)
+const CALENDAR_EVENTS_FILE = path.join(process.cwd(), "calendar_events.json");
+
+function getCalendarEventsDb() {
+  try {
+    if (!fs.existsSync(CALENDAR_EVENTS_FILE)) {
+      const defaultEvents = [
+        { "id": "1", "title": "Sundays Worship Service", "type": "gold", "date": "2026-07-05" },
+        { "id": "2", "title": "Mid-week Prayer Vigil", "type": "blue", "date": "2026-07-08" },
+        { "id": "3", "title": "Apostolic Bible Study", "type": "gold", "date": "2026-07-12" },
+        { "id": "4", "title": "Greater Crusades Preparation", "type": "green", "date": "2026-07-19" },
+        { "id": "5", "title": "Sanctuary Covenant Dedication", "type": "gold", "date": "2026-07-26" }
+      ];
+      fs.writeFileSync(CALENDAR_EVENTS_FILE, JSON.stringify(defaultEvents, null, 2), "utf-8");
+      return defaultEvents;
+    }
+    const data = fs.readFileSync(CALENDAR_EVENTS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    console.error("Error reading calendar events DB:", err);
+    return [];
+  }
+}
+
+function saveCalendarEventsDb(events: any[]) {
+  try {
+    fs.writeFileSync(CALENDAR_EVENTS_FILE, JSON.stringify(events, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error writing calendar events DB:", err);
+  }
+}
+
+// Handler helper to call Google Calendar API or fallback to local file
+async function handleGoogleCalendarFunctionCall(name: string, args: any, googleAccessToken: string | null) {
+  if (name === "list_calendar_events") {
+    if (googleAccessToken) {
+      try {
+        const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=100", {
+          headers: { Authorization: `Bearer ${googleAccessToken}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return (data.items || []).map((item: any) => {
+            const dateStr = item.start?.date || item.start?.dateTime?.split("T")[0];
+            let type: "gold" | "blue" | "green" = "gold";
+            if (item.description && item.description.includes("blue")) type = "blue";
+            if (item.description && item.description.includes("green")) type = "green";
+            return {
+              id: item.id,
+              title: item.summary || "Untitled Event",
+              date: dateStr,
+              type: type,
+              isGoogle: true
+            };
+          });
+        }
+      } catch (e: any) {
+        console.warn("Function calling Google Calendar List failed, using local DB:", e.message);
+      }
+    }
+    return getCalendarEventsDb();
+  }
+
+  if (name === "add_calendar_event") {
+    const { title, date, type } = args;
+    const eventType = type || "gold";
+    if (googleAccessToken) {
+      try {
+        const startDate = new Date(date);
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 1);
+        const endDateStr = endDate.toISOString().split("T")[0];
+
+        const googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            summary: title,
+            description: `Liturgical event of type: ${eventType}`,
+            start: { date: date },
+            end: { date: endDateStr },
+          }),
+        });
+        if (googleRes.ok) {
+          const item = await googleRes.json();
+          return { success: true, message: `Created Google Event: ${title}`, event: { id: item.id, title, date, type: eventType, isGoogle: true } };
+        }
+      } catch (e: any) {
+        console.warn("Function calling Google Calendar Add failed, using local DB:", e.message);
+      }
+    }
+
+    const localEvents = getCalendarEventsDb();
+    const newEvent = { id: "local_" + Date.now(), title, date, type: eventType };
+    localEvents.push(newEvent);
+    saveCalendarEventsDb(localEvents);
+    return { success: true, message: `Created Local Event: ${title}`, event: newEvent };
+  }
+
+  if (name === "delete_calendar_event") {
+    const { eventId } = args;
+    if (googleAccessToken && !String(eventId).startsWith("local_")) {
+      try {
+        const googleRes = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${googleAccessToken}` }
+        });
+        if (googleRes.ok) {
+          return { success: true, message: `Deleted Google Event ID: ${eventId}` };
+        }
+      } catch (e: any) {
+        console.warn("Function calling Google Calendar Delete failed, using local DB:", e.message);
+      }
+    }
+
+    const localEvents = getCalendarEventsDb();
+    const updated = localEvents.filter((ev: any) => ev.id !== eventId);
+    saveCalendarEventsDb(updated);
+    return { success: true, message: `Deleted Local Event ID: ${eventId}` };
+  }
+
+  return { error: "Unknown function" };
+}
+
 // 1. DYNAMIC CHAT GATEWAY (BibleGPT, Sound Faith Guide, Haven, Chatbots)
 app.post("/api/gemini/chat", async (req, res) => {
-  const { messages, systemInstruction, temperature, useHighThinking, version } = req.body;
+  const { messages, systemInstruction, temperature, useHighThinking, version, googleAccessToken } = req.body;
   
   const userPrompt = messages?.[messages.length - 1]?.content || "Hello";
   const preferredVersion = version || "KJV";
@@ -87,12 +214,52 @@ app.post("/api/gemini/chat", async (req, res) => {
 
   try {
     const ai = getGenAI();
-    // Use gemini-3.5-flash for standard chat, supporting thinking Config if selected
     const modelToUse = "gemini-3.5-flash";
+
+    // Define tools for Google Calendar integration via Function Calling
+    const calendarTools = [
+      {
+        functionDeclarations: [
+          {
+            name: "list_calendar_events",
+            description: "Retrieves active calendar events from the user's church liturgical calendar.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {},
+            }
+          },
+          {
+            name: "add_calendar_event",
+            description: "Adds a new covenant-aligned church event to the calendar.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING, description: "The title of the church event or service" },
+                date: { type: Type.STRING, description: "The date of the event in YYYY-MM-DD format" },
+                type: { type: Type.STRING, description: "The styling tier or type of event: 'gold', 'blue', or 'green'" }
+              },
+              required: ["title", "date"]
+            }
+          },
+          {
+            name: "delete_calendar_event",
+            description: "Deletes a church liturgical calendar event by its event ID.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                eventId: { type: Type.STRING, description: "The unique ID of the event to delete" }
+              },
+              required: ["eventId"]
+            }
+          }
+        ]
+      }
+    ];
 
     const config: any = {
       systemInstruction: formattedSystemInstruction,
       temperature: temperature !== undefined ? temperature : 0.7,
+      tools: calendarTools
     };
 
     if (useHighThinking) {
@@ -107,7 +274,40 @@ app.post("/api/gemini/chat", async (req, res) => {
       config
     });
 
-    res.json({ text: response.text || "No response received." });
+    let finalModelResponse = "";
+    let invokedFunctionName = "";
+    let functionCallResult: any = null;
+
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const callPart = parts.find((p: any) => p.functionCall);
+
+    if (callPart) {
+      const call = callPart.functionCall;
+      invokedFunctionName = call.name;
+      const args = call.args;
+      
+      // Execute the calendar operation directly on the server
+      functionCallResult = await handleGoogleCalendarFunctionCall(invokedFunctionName, args, googleAccessToken);
+
+      // Call Gemini again to format the final conversational response gracefully
+      try {
+        const followUpResponse = await ai.models.generateContent({
+          model: modelToUse,
+          contents: `The function '${invokedFunctionName}' was executed with result: ${JSON.stringify(functionCallResult)}. The original request was: "${userPrompt}". Provide a beautiful conversational response to the user with scripture grounding.`
+        });
+        finalModelResponse = followUpResponse.text || "Your calendar has been updated successfully.";
+      } catch (err) {
+        finalModelResponse = `Sovereign event alignment complete. Triggered operation: ${invokedFunctionName}. Result: ${JSON.stringify(functionCallResult)}`;
+      }
+    } else {
+      finalModelResponse = response.text || "No response received.";
+    }
+
+    res.json({ 
+      text: finalModelResponse,
+      functionCalled: invokedFunctionName,
+      functionResult: functionCallResult
+    });
   } catch (err: any) {
     console.error("Gemini Chat Failure:", err);
     // Offline / Missing-Key local highly detailed fallback
@@ -2232,6 +2432,147 @@ OUTPUT MUST BE EXCLUSIVELY VALID JSON according to the specified schema. Keep it
       error: true
     });
   }
+});
+
+// Calendar REST API routes (GET, POST, DELETE) with Google Calendar support
+app.get("/api/calendar/events", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+  if (token) {
+    try {
+      const googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=100", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (googleRes.ok) {
+        const data = await googleRes.json();
+        const googleEvents = (data.items || []).map((item: any) => {
+          const dateStr = item.start?.date || item.start?.dateTime?.split("T")[0];
+          let type: "gold" | "blue" | "green" = "gold";
+          if (item.description && item.description.includes("blue")) type = "blue";
+          if (item.description && item.description.includes("green")) type = "green";
+          return {
+            id: item.id,
+            title: item.summary || "Untitled Event",
+            date: dateStr,
+            type: type,
+            isGoogle: true
+          };
+        });
+        return res.json({ events: googleEvents, source: "google" });
+      } else {
+        console.warn("Google Calendar fetch failed, falling back to local database:", googleRes.statusText);
+      }
+    } catch (e: any) {
+      console.warn("Google Calendar API error, falling back to local database:", e.message);
+    }
+  }
+
+  // Fallback to local file
+  const localEvents = getCalendarEventsDb();
+  res.json({ events: localEvents, source: "local" });
+});
+
+app.post("/api/calendar/events", async (req, res) => {
+  const { title, date, type } = req.body;
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+  if (!title || !date) {
+    return res.status(400).json({ error: "Title and date are required." });
+  }
+
+  const eventType = type || "gold";
+
+  if (token) {
+    try {
+      const startDate = new Date(date);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 1);
+      const endDateStr = endDate.toISOString().split("T")[0];
+
+      const googleRes = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          summary: title,
+          description: `Liturgical event of type: ${eventType}`,
+          start: { date: date },
+          end: { date: endDateStr },
+        }),
+      });
+
+      if (googleRes.ok) {
+        const createdEvent = await googleRes.json();
+        return res.json({
+          success: true,
+          event: {
+            id: createdEvent.id,
+            title: createdEvent.summary,
+            date: date,
+            type: eventType,
+            isGoogle: true
+          }
+        });
+      } else {
+        const errorText = await googleRes.text();
+        console.warn("Google Calendar POST failed, saving to local DB instead:", errorText);
+      }
+    } catch (e: any) {
+      console.warn("Google Calendar POST error, saving to local DB:", e.message);
+    }
+  }
+
+  // Local write
+  const localEvents = getCalendarEventsDb();
+  const newEvent = {
+    id: "local_" + Date.now(),
+    title,
+    date,
+    type: eventType
+  };
+  localEvents.push(newEvent);
+  saveCalendarEventsDb(localEvents);
+
+  res.json({ success: true, event: newEvent, source: "local" });
+});
+
+app.delete("/api/calendar/events/:eventId", async (req, res) => {
+  const { eventId } = req.params;
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+  if (token && !String(eventId).startsWith("local_")) {
+    try {
+      const googleRes = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (googleRes.ok) {
+        return res.json({ success: true, message: "Deleted from Google Calendar" });
+      } else {
+        const errorText = await googleRes.text();
+        console.warn("Google Calendar DELETE failed, attempting local removal:", errorText);
+      }
+    } catch (e: any) {
+      console.warn("Google Calendar DELETE error:", e.message);
+    }
+  }
+
+  // Local delete
+  const localEvents = getCalendarEventsDb();
+  const updatedEvents = localEvents.filter((ev: any) => ev.id !== eventId);
+  saveCalendarEventsDb(updatedEvents);
+
+  res.json({ success: true, message: "Deleted from local registry" });
 });
 
 // API index route

@@ -3,7 +3,7 @@ import {
   Flame, Clock, ChevronRight, LayoutDashboard, Calendar, Users, ShieldAlert, BadgeInfo,
   Sliders, Bot, Globe, ShieldCheck, Mail, Volume2, Sparkles, BookOpen, AlertTriangle,
   Shield, Crown, Star, Sun, Heart, Check, Save, LogIn, LogOut, CloudLightning, ShieldOff, CreditCard,
-  Video, Copy, ExternalLink, Loader2, Link
+  Video, Copy, ExternalLink, Loader2, Link, Trash
 } from "lucide-react";
 
 import { 
@@ -475,6 +475,8 @@ export default function App() {
       provider.addScope("https://www.googleapis.com/auth/meetings.space.readonly");
       provider.addScope("https://www.googleapis.com/auth/meetings.space.settings");
       provider.addScope("https://www.googleapis.com/auth/contacts");
+      provider.addScope("https://www.googleapis.com/auth/calendar");
+      provider.addScope("https://www.googleapis.com/auth/calendar.events");
       
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -529,11 +531,16 @@ export default function App() {
           messages: [...chatbotMessages, userMsg],
           systemInstruction: `You are the FaithFlow AI Ministry Assistant — a wise, scripture-grounded, pastoral companion. Anchor your answers theological soundness and relevant verse notations from ${preferredVersion} translation. Always cite accurately.`,
           useHighThinking: isChatbotHighThinking,
-          version: preferredVersion
+          version: preferredVersion,
+          googleAccessToken: googleAccessToken
         })
       });
       const data = await res.json();
       setChatbotMessages(prev => [...prev, { role: "assistant", content: data.text }]);
+      if (data.functionCalled) {
+        triggerToast("✨", `Heavenly Event Sync: ${data.functionCalled}`);
+        fetchCalendarEvents();
+      }
     } catch(e) {
       setChatbotMessages(prev => [...prev, { role: "assistant", content: "Grace to you. Operating in high latency safeguard mode. Let us meditate on Psalm 23." }]);
     } finally {
@@ -541,16 +548,104 @@ export default function App() {
     }
   };
 
-  // Church Calendar Custom states
-  const [calendarMonthIndex, setCalendarMonthIndex] = useState(4); // May
-  const daysInMay = Array.from({ length: 31 }, (_, i) => i + 1);
-  const activeEventsMap: { [day: number]: { title: string; type: "gold" | "blue" | "green" } } = {
-    10: { title: "Sundays Service", type: "gold" },
-    13: { title: "Prayer Vigil", type: "blue" },
-    17: { title: "Pentecost Study", type: "gold" },
-    24: { title: "Greater Crusade Prep", type: "green" },
-    31: { title: "Sanctuary Dedication", type: "gold" }
+  // Church Calendar Custom states (Generates and displays the current date dynamically)
+  const [calendarMonthIndex, setCalendarMonthIndex] = useState(new Date().getMonth()); // current month (0-indexed)
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear()); // current year
+  const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+
+  // Quick event creation states
+  const [showAddEventModal, setShowAddEventModal] = useState(false);
+  const [newCalEventTitle, setNewCalEventTitle] = useState("");
+  const [newCalEventDate, setNewCalEventDate] = useState("");
+  const [newCalEventType, setNewCalEventType] = useState<"gold" | "blue" | "green">("gold");
+
+  const getCurrentFormattedDate = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
+
+  const fetchCalendarEvents = async () => {
+    setCalendarLoading(true);
+    try {
+      const headers: any = {};
+      if (googleAccessToken) {
+        headers["Authorization"] = `Bearer ${googleAccessToken}`;
+      }
+      const res = await fetch("/api/calendar/events", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarEvents(data.events || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch calendar events:", e);
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleAddCalendarEvent = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const targetDate = newCalEventDate || getCurrentFormattedDate();
+    if (!newCalEventTitle.trim()) {
+      triggerToast("⚠️", "Please specify a title for the church event.");
+      return;
+    }
+    try {
+      const headers: any = { "Content-Type": "application/json" };
+      if (googleAccessToken) {
+        headers["Authorization"] = `Bearer ${googleAccessToken}`;
+      }
+      const res = await fetch("/api/calendar/events", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: newCalEventTitle,
+          date: targetDate,
+          type: newCalEventType
+        })
+      });
+      if (res.ok) {
+        triggerToast("📅", `Successfully scheduled calendar event: "${newCalEventTitle}"!`);
+        setNewCalEventTitle("");
+        setShowAddEventModal(false);
+        fetchCalendarEvents();
+      } else {
+        throw new Error("Calendar registry submission failed.");
+      }
+    } catch (err: any) {
+      triggerToast("❌", `Failed to add calendar event: ${err.message}`);
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (eventId: string, eventTitle: string) => {
+    if (!confirm(`Are you sure you want to cancel and remove: "${eventTitle}"?`)) return;
+    try {
+      const headers: any = {};
+      if (googleAccessToken) {
+        headers["Authorization"] = `Bearer ${googleAccessToken}`;
+      }
+      const res = await fetch(`/api/calendar/events/${eventId}`, {
+        method: "DELETE",
+        headers
+      });
+      if (res.ok) {
+        triggerToast("🗑️", `Successfully removed calendar event: "${eventTitle}"!`);
+        fetchCalendarEvents();
+      } else {
+        throw new Error("Calendar deletion request failed.");
+      }
+    } catch (err: any) {
+      triggerToast("❌", `Failed to delete event: ${err.message}`);
+    }
+  };
+
+  useEffect(() => {
+    fetchCalendarEvents();
+  }, [googleAccessToken]);
 
   // AI-Powered Brand Customization
   const [isGeneratingBranding, setIsGeneratingBranding] = useState(false);
@@ -1014,57 +1109,250 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: CHURCH CALENDAR */}
           {activeTab === "calendar" && (
-            <div className="border border-[#D4AF37]/30 bg-[#0D1B3E] p-4 rounded-xl space-y-4 gold-glow animate-fade-in font-sans-raleway">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-[#D4AF37]/15 pb-3">
-                <h2 className="text-base font-serif-cinzel font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-[#D4AF37]" /> Active Liturgical Calendar (May 2026)
-                </h2>
-                <div className="flex bg-[#0A0F1E] border border-white/5 rounded-lg p-1 text-xs">
-                  <span className="bg-[#D4AF37] text-black px-3 py-1 rounded-md font-bold">Month View</span>
-                  <span className="text-slate-450 px-3 py-1 rounded inline-block">Week</span>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+              {/* Left 2 columns: The Calendar Grid */}
+              <div className="lg:col-span-2 border border-[#D4AF37]/30 bg-[#0D1B3E] p-4 rounded-xl space-y-4 gold-glow font-sans-raleway">
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-[#D4AF37]/15 pb-3">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-serif-cinzel font-bold text-white flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-[#D4AF37]" /> Active Liturgical Calendar
+                    </h2>
+                    <p className="text-[11px] text-slate-400">
+                      Today is <span className="text-[#D4AF37] font-semibold">{new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</span>
+                    </p>
+                  </div>
+                  
+                  {/* Month Navigation */}
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        if (calendarMonthIndex === 0) {
+                          setCalendarMonthIndex(11);
+                          setCalendarYear(prev => prev - 1);
+                        } else {
+                          setCalendarMonthIndex(prev => prev - 1);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg border border-white/5 bg-[#0A0F1E] hover:border-[#D4AF37]/30 text-white transition cursor-pointer"
+                    >
+                      &larr;
+                    </button>
+                    <span className="text-xs font-bold text-[#D4AF37] min-w-[100px] text-center">
+                      {[
+                        "January", "February", "March", "April", "May", "June",
+                        "July", "August", "September", "October", "November", "December"
+                      ][calendarMonthIndex]} {calendarYear}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        if (calendarMonthIndex === 11) {
+                          setCalendarMonthIndex(0);
+                          setCalendarYear(prev => prev + 1);
+                        } else {
+                          setCalendarMonthIndex(prev => prev + 1);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg border border-white/5 bg-[#0A0F1E] hover:border-[#D4AF37]/30 text-white transition cursor-pointer"
+                    >
+                      &rarr;
+                    </button>
+                  </div>
+                </div>
+
+                {/* Google Calendar Sync State Indicator */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 rounded-lg bg-[#0A0F1E]/60 border border-white/5 text-[11px]">
+                  {googleAccessToken ? (
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Connected to Google Calendar API (Real-time Cloud Integration)</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-[#D4AF37]" />
+                      <span>Using offline local database. Connect to Google Calendar to synchronize cloud events.</span>
+                    </div>
+                  )}
+                  {!googleAccessToken ? (
+                    <button 
+                      onClick={handleGoogleSignIn}
+                      className="bg-[#D4AF37] text-black font-bold px-3 py-1 rounded hover:bg-[#F0C940] transition text-[10px] uppercase tracking-wider"
+                    >
+                      Sync Google Calendar
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleSignOutAuth}
+                      className="bg-red-500/10 text-red-400 border border-red-500/20 font-semibold px-2.5 py-0.5 rounded hover:bg-red-500/25 transition text-[10px]"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+
+                {/* Monthly Calendar Grid layout */}
+                <div className="grid grid-cols-7 gap-1 text-center font-sans">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
+                    <span key={day} className="text-[10px] uppercase font-bold text-[#D4AF37] py-1 bg-[#112055]/30 rounded">
+                      {day}
+                    </span>
+                  ))}
+                  
+                  {/* Empty starting blocks for month offset */}
+                  {Array.from({ length: new Date(calendarYear, calendarMonthIndex, 1).getDay() }).map((_, i) => (
+                    <div key={`offset-${i}`} className="min-h-[54px] bg-transparent" />
+                  ))}
+
+                  {/* Month Days */}
+                  {Array.from({ length: new Date(calendarYear, calendarMonthIndex + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
+                    const isToday = 
+                      new Date().getDate() === day && 
+                      new Date().getMonth() === calendarMonthIndex && 
+                      new Date().getFullYear() === calendarYear;
+
+                    const dayEvents = calendarEvents.filter(ev => {
+                      if (!ev.date) return false;
+                      const d = new Date(ev.date + "T00:00:00");
+                      return d.getDate() === day && d.getMonth() === calendarMonthIndex && d.getFullYear() === calendarYear;
+                    });
+
+                    return (
+                      <div 
+                        key={`day-${day}`} 
+                        onClick={() => {
+                          if (dayEvents.length > 0) {
+                            triggerToast("📅", `${dayEvents.length} event(s) scheduled for this day.`);
+                          } else {
+                            setNewCalEventDate(`${calendarYear}-${String(calendarMonthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+                            setShowAddEventModal(true);
+                          }
+                        }}
+                        className={`min-h-[58px] p-1 border border-white/5 rounded-lg text-left transition relative cursor-pointer ${
+                          isToday ? "bg-[#D4AF37]/15 border-[#D4AF37]" : "bg-[#0A0F1E]/50 hover:bg-[#112055]/25"
+                        }`}
+                      >
+                        <span className={`text-[10px] font-bold font-memo block mb-0.5 ${isToday ? "text-[#D4AF37]" : "text-slate-400"}`}>
+                          {day} {isToday && " (Today)"}
+                        </span>
+                        
+                        <div className="space-y-0.5 max-h-[38px] overflow-hidden">
+                          {dayEvents.map(ev => (
+                            <p 
+                              key={ev.id} 
+                              className={`text-[8px] px-1 py-0.5 rounded truncate font-sans font-semibold leading-none border ${
+                                ev.type === "green" 
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/15" 
+                                  : ev.type === "blue" 
+                                    ? "bg-blue-500/10 text-blue-400 border-blue-500/15" 
+                                    : "bg-[#D4AF37]/15 text-[#D4AF37] border-[#D4AF37]/20"
+                              }`}
+                              title={ev.title}
+                            >
+                              {ev.title}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Monthly Calendar Grid layout */}
-              <div className="grid grid-cols-7 gap-1 text-center font-sans">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
-                  <span key={day} className="text-[10px] uppercase font-bold text-[#D4AF37] py-1 bg-[#112055]/30 rounded">
-                    {day}
-                  </span>
-                ))}
-                
-                {/* 3 placeholder days to shift block */}
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="min-h-[50px] bg-transparent" />
-                ))}
+              {/* Column 3: Event List & Event Creation panel */}
+              <div className="border border-[#D4AF37]/30 bg-[#0D1B3E] p-4 rounded-xl space-y-4 gold-glow font-sans-raleway text-xs text-[#B0C4DE]">
+                <div className="border-b border-[#D4AF37]/15 pb-2">
+                  <h3 className="text-sm font-serif-cinzel font-bold text-white uppercase tracking-wider">
+                    Add & Cancel Liturgical Events
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Use the controls below to configure liturgical assembly dates.</p>
+                </div>
 
-                {daysInMay.map(day => {
-                  const ev = activeEventsMap[day];
-                  return (
-                    <div 
-                      key={day} 
-                      onClick={() => {
-                        if (ev) triggerToast("📅", ` Liturgical Event: ${ev.title}`);
-                      }}
-                      className={`min-h-[54px] p-1 border border-white/5 rounded-lg text-left transition ${
-                        day === 20 ? "bg-[#D4AF37]/15 border-[#D4AF37]" : "bg-[#0A0F1E]/50 hover:bg-[#112055]/20"
-                      }`}
-                    >
-                      <span className={`text-[10px] font-bold font-memo ${day === 20 ? "text-[#D4AF37]" : "text-slate-400"}`}>
-                        {day} {day === 20 && " (Today)"}
-                      </span>
-                      {ev && (
-                        <p className={`text-[8px] px-1 py-0.5 rounded truncate font-sans-raleway font-semibold leading-normal ${
-                          ev.type === "gold" ? "bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/15"
-                        }`}>
-                          {ev.title}
-                        </p>
-                      )}
+                {/* Event Creation Form */}
+                <div className="bg-[#0A0F1E]/85 p-3 rounded-lg border border-[#D4AF37]/15 space-y-2.5">
+                  <span className="text-[10px] font-bold uppercase text-[#D4AF37] tracking-wider block">Schedule New Assembly Event</span>
+                  <div>
+                    <label className="block text-[10px] text-[#B0C4DE] mb-0.5">Event Name Summary</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Divine Breakthrough Vigil" 
+                      value={newCalEventTitle} 
+                      onChange={e => setNewCalEventTitle(e.target.value)} 
+                      className="w-full bg-[#0A0F1E] text-white text-xs p-2 rounded border border-[#D4AF37]/20 focus:border-[#D4AF37]/60 outline-none" 
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-[#B0C4DE] mb-0.5">Covenant Date</label>
+                      <input 
+                        type="date" 
+                        value={newCalEventDate || getCurrentFormattedDate()} 
+                        onChange={e => setNewCalEventDate(e.target.value)} 
+                        className="w-full bg-[#0A0F1E] text-white text-xs p-1.5 rounded border border-[#D4AF37]/20 focus:border-[#D4AF37]/60 outline-none" 
+                      />
                     </div>
-                  );
-                })}
+                    <div>
+                      <label className="block text-[10px] text-[#B0C4DE] mb-0.5">Event Styling Tier</label>
+                      <select 
+                        value={newCalEventType} 
+                        onChange={e => setNewCalEventType(e.target.value as any)} 
+                        className="w-full bg-[#0A0F1E] text-white text-xs p-1.5 rounded border border-[#D4AF37]/20 focus:border-[#D4AF37]/60 outline-none"
+                      >
+                        <option value="gold">Gold (Sacred Sunday/Vigil)</option>
+                        <option value="blue">Blue (Mid-week Studies)</option>
+                        <option value="green">Green (Crusades/Intercession)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => handleAddCalendarEvent()}
+                    className="w-full bg-[#D4AF37] hover:bg-[#F0C940] text-black font-bold py-2 rounded transition shadow"
+                  >
+                    Add Covenant Event
+                  </button>
+                </div>
+
+                {/* Event Schedule List for this month */}
+                <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block">Scheduled for this month</span>
+                  {calendarLoading ? (
+                    <div className="text-center py-4 text-slate-400 animate-pulse text-[11px]">Aligning church calendar databases...</div>
+                  ) : calendarEvents.filter(ev => {
+                    if (!ev.date) return false;
+                    const d = new Date(ev.date + "T00:00:00");
+                    return d.getFullYear() === calendarYear && d.getMonth() === calendarMonthIndex;
+                  }).length === 0 ? (
+                    <div className="text-center py-6 text-slate-500 italic bg-[#0A0F1E]/30 rounded border border-white/5">
+                      No active events scheduled on calendar for this month.
+                    </div>
+                  ) : (
+                    calendarEvents
+                      .filter(ev => {
+                        if (!ev.date) return false;
+                        const d = new Date(ev.date + "T00:00:00");
+                        return d.getFullYear() === calendarYear && d.getMonth() === calendarMonthIndex;
+                      })
+                      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                      .map(ev => (
+                        <div key={ev.id} className="flex justify-between items-center bg-[#0A0F1E]/50 p-2 rounded border border-white/5 hover:border-[#D4AF37]/35 transition">
+                          <div className="space-y-0.5">
+                            <h4 className="text-white font-bold text-[11px] truncate max-w-[150px]">{ev.title}</h4>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-[#D4AF37] font-semibold">{new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                              <span className={`w-1.5 h-1.5 rounded-full ${ev.type === "green" ? "bg-emerald-400" : ev.type === "blue" ? "bg-blue-400" : "bg-[#D4AF37]"}`} />
+                              {ev.isGoogle && <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1 rounded border border-blue-500/25">Google</span>}
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => handleDeleteCalendarEvent(ev.id, ev.title)}
+                            className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition cursor-pointer"
+                            title="Delete Event"
+                          >
+                            <Trash className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
               </div>
             </div>
           )}
